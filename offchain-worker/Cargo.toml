@@ -1,12 +1,12 @@
 [package]
-name = "pallet-ocw"
 authors = ['Kylin <https://github.com/kylin-network>']
+description = 'Offchain Worker Demo'
+edition = '2018'
 homepage = 'https://kylin.network'
 license = 'Apache 2.0'
-version = "2.0.0"
-repository = "https://github.com/kylin-network/kylin-node"
-description = "ocw module demo"
-readme = "README.md"
+name = 'pallet-ocw'
+repository = 'https://github.com/kylin-network/kylin-node/'
+version = '2.0.0'
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
