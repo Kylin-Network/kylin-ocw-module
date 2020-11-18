@@ -2,6 +2,8 @@
 
 Kylin OCW Repo contains the pallets for PoC.
 
+**CAUTION! PLEASE DONOT USE THIS REPO DIRECTLY**
+
 ### Test account
 alice
 ```bash
