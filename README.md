@@ -29,7 +29,7 @@ reference runtime/src/lib.rs, or reference recipes/runtimes/ocw-runtime/src/lib.
 
 when use offchain, need specific transaction's keys, they will query from substarte's keystore, so need use insertKey to add certain keytype, like ocw's keyType=ocpf;
 
-### test account
+### Test account
 alice
 ```bash
 $ subkey inspect "bottom drive obey lake curtain smoke basket hold race lonely fit walk" --scheme ed25519
@@ -48,7 +48,7 @@ Secret phrase `bottom drive obey lake curtain smoke basket hold race lonely fit 
 
 ```
 
-### ocw transaction's Q&A
+### OCW transaction's Q&A
 ```bash
 WARN (offchain call) Error submitting a transaction to the pool: Pool(UnknownTransaction(UnknownTransaction::NoUnsignedValidator))
 ```
