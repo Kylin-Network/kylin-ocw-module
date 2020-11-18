@@ -4,7 +4,7 @@ authors = ['Kylin <https://github.com/kylin-network>']
 homepage = 'https://kylin.network'
 license = 'Apache 2.0'
 version = "2.0.0"
-repository = "https://github.com/paritytech/substrate/"
+repository = "https://github.com/kylin-network/kylin-node"
 description = "ocw module demo"
 readme = "README.md"
 
