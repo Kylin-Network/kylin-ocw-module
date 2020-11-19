@@ -1,10 +1,10 @@
 [package]
+name = 'offchain-worker'
 authors = ['Kylin <https://github.com/kylin-network>']
 description = 'Offchain Worker Demo'
 edition = '2018'
 homepage = 'https://kylin.network'
 license = 'Apache 2.0'
-name = 'pallet-ocw'
 repository = 'https://github.com/kylin-network/kylin-node/'
 version = '2.0.0'
 

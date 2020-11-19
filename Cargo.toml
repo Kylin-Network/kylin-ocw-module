@@ -3,7 +3,8 @@ panic = 'unwind'
 
 [workspace]
 members = [
-    'node',
-    'pallets/template',
-    'runtime',
+    'offchain-worker',
+    'template',
+    'kylin-oracle',
+    'kylin-ocw',
 ]
