@@ -1,5 +1,5 @@
 [package]
-name = 'offchain-worker'
+name = 'pallet-ocw'
 authors = ['Kylin <https://github.com/kylin-network>']
 description = 'Offchain Worker Demo'
 edition = '2018'
