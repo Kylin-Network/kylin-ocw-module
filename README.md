@@ -27,7 +27,7 @@ Secret phrase `bottom drive obey lake curtain smoke basket hold race lonely fit 
 ```bash
 WARN (offchain call) Error submitting a transaction to the pool: Pool(UnknownTransaction(UnknownTransaction::NoUnsignedValidator))
 ```
-UnsigneTransactiond, must the validator can submit, you need use validator's key in ocw.
+UnsigneTransactiond, must the validator can submit, you need use validator's key in OCW.
 
 ```bash
 WARN (offchain call) Error submitting a transaction to the pool: Pool(InvalidTransaction(InvalidTransaction::Payment)) 
