@@ -2,7 +2,7 @@
 authors = ['kuleleyokn42 <kuleleyokn@protonmail.com>']
 description = 'Pallet fetches data from external service and save to chain'
 edition = '2018'
-name = 'pallet-data-fetcher'
+name = 'kylin-data-fetcher'
 version = '2.0.0'
 
 [package.metadata.docs.rs]
