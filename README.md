@@ -1,6 +1,6 @@
 # Kylin OCW Modules
 
-Kylin OCW repo contains the pallets for PoC.
+Kylin OCW Repo contains the pallets for PoC.
 
 **CAUTION! PLEASE DONOT USE THIS REPO DIRECTLY**
 
