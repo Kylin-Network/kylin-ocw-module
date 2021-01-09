@@ -348,28 +348,3 @@ fn should_submit_raw_unsigned_transaction_on_chain() {
 	});
 }
 
-fn price_oracle_response(state: &mut testing::OffchainState) {
-	state.expect_request(testing::PendingRequest {
-		method: "GET".into(),
-		uri: "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD".into(),
-		response: Some(br#"{"USD": 155.23}"#.to_vec()),
-		sent: true,
-		..Default::default()
-	});
-}
-
-#[test]
-fn parse_price_works() {
-	let test_data = vec![
-		("{\"USD\":6536.92}", Some(653692)),
-		("{\"USD\":65.92}", Some(6592)),
-		("{\"USD\":6536.924565}", Some(653692)),
-		("{\"USD\":6536}", Some(653600)),
-		("{\"USD2\":6536}", None),
-		("{\"USD\":\"6432\"}", None),
-	];
-
-	for (json, expected) in test_data {
-		assert_eq!(expected, Example::parse_price(json));
-	}
-}
