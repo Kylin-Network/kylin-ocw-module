@@ -5,7 +5,7 @@ Kylin OCW Repo contains the pallets for PoC.
 **CAUTION! PLEASE DONOT USE THIS REPO DIRECTLY**
 
 ### Test account
-alice
+Alice
 ```bash
 $ subkey inspect "bottom drive obey lake curtain smoke basket hold race lonely fit walk" --scheme ed25519
 Secret phrase `bottom drive obey lake curtain smoke basket hold race lonely fit walk` is account:
