@@ -1,9 +1,9 @@
-#[package]
-#name = 'kylin-ocw'
-#authors = ['Kylin <https://github.com/kylin-network>']
-#description = 'Pallet fetches data from external service and save to chain'
-#edition = '2018'
-#version = '3.0.0'
+[package]
+name = 'kylin-ocw'
+authors = ['Kylin <https://github.com/kylin-network>']
+description = 'Pallet fetches data from external service and save to chain'
+edition = '2018'
+version = '3.0.0'
 #
 #[package.metadata.docs.rs]
 #targets = ['x86_64-unknown-linux-gnu']
