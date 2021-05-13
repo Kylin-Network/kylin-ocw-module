@@ -280,8 +280,6 @@ pub mod pallet {
 
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1))]
 		pub fn add_fetch_data_request(origin: OriginFor<T>, url: Vec<u8>) -> DispatchResult {
-			// Retrieve sender of the transaction.
-			let who = ensure_signed(origin)?;
 			let index = DataId::<T>::get();
 			DataId::<T>::put(index + 1u64);
 			<RequestedOffchainData<T>>::insert(index, DataInfo {
