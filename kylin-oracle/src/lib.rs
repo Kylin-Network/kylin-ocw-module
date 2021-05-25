@@ -7,6 +7,17 @@ pub use pallet::*;
 // use frame_system::{
 // 	self as system,
 // };
+
+#[cfg(test)]
+mod mock;
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
+
+
 use sp_core::crypto::KeyTypeId;
 
 
@@ -62,7 +73,7 @@ mod benchmarking;
 pub mod pallet {
 	use frame_support::{log, dispatch::DispatchResultWithPostInfo, pallet_prelude::*};
 	use frame_system::pallet_prelude::*;
-	use codec::{Decode, Encode};
+	use parity_scale_codec::{Decode, Encode};
 	use sp_std::str;
 	use sp_std::vec::Vec;
 	use frame_support::storage::IterableStorageMap;
@@ -74,9 +85,6 @@ pub mod pallet {
 	};
 	use sp_runtime::{
 		offchain::{http, Duration},
-		transaction_validity::{
-			TransactionPriority,
-		},
 	};
 
 
@@ -86,13 +94,6 @@ pub mod pallet {
 		url: Vec<u8>,
 		data: Vec<u8>,
 	}
-
-	/// Configure the pallet by specifying the parameters and types on which it depends.
-	// #[pallet::config]
-	// pub trait Config: frame_system::Config {
-	// 	/// Because this pallet emits events, it depends on the runtime's definition of an event.
-	// 	type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
-	// }
 
 	#[pallet::config]
 	pub trait Config: CreateSignedTransaction<Call<Self>> + frame_system::Config {
@@ -104,58 +105,10 @@ pub mod pallet {
 
 		/// The overarching dispatch call type.
 		type Call: From<Call<Self>>;
-
-		/// A grace period after we send transaction.
-		///
-		/// To avoid sending too many transactions, we only attempt to send one
-		/// every `GRACE_PERIOD` blocks. We use Local Storage to coordinate
-		/// sending between distinct runs of this offchain worker.
-		type GracePeriod: Get<Self::BlockNumber>;
-
-
-		/// Number of blocks of cooldown after unsigned transaction is included.
-        ///
-        /// This ensures that we only accept unsigned transactions once, every `UnsignedInterval` blocks.
-		type UnsignedInterval: Get<Self::BlockNumber>;
-
-		/// A configuration for base priority of unsigned transactions.
-        ///
-        /// This is exposed so that it can be tuned for particular runtime, when
-        /// multiple pallets send unsigned transactions.
-		type UnsignedPriority: Get<TransactionPriority>;
-
-
-
-		// #[pallet::constant]
-		// type InitalDataIndex:  Get<u64> ;
-
-		// Configuration parameters
-		//
-		// /// A grace period after we send transaction.
-		// ///
-		// /// To avoid sending too many transactions, we only attempt to send one
-		// /// every `GRACE_PERIOD` blocks. We use Local Storage to coordinate
-		// /// sending between distinct runs of this offchain worker.
-		// #[pallet::constant]
-		// type GracePeriod: Get<Self::BlockNumber>;
-		//
-		// /// Number of blocks of cooldown after unsigned transaction is included.
-		// ///
-		// /// This ensures that we only accept unsigned transactions once, every `UnsignedInterval` blocks.
-		// #[pallet::constant]
-		// type UnsignedInterval: Get<Self::BlockNumber>;
-		//
-		// /// A configuration for base priority of unsigned transactions.
-		// ///
-		// /// This is exposed so that it can be tuned for particular runtime, when
-		// /// multiple pallets send unsigned transactions.
-		// #[pallet::constant]
-		// type UnsignedPriority: Get<TransactionPriority>;
 	}
 
-
 	/// Payload used by this example crate to hold price
-/// data required to submit a transaction.
+	/// data required to submit a transaction.
 	#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug)]
 	pub struct PricePayload<Public, BlockNumber> {
 		block_number: BlockNumber,
@@ -168,7 +121,6 @@ pub mod pallet {
 			self.public.clone()
 		}
 	}
-
 
 	#[pallet::pallet]
 	#[pallet::generate_store(pub(super) trait Store)]
@@ -279,7 +231,7 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1))]
-		pub fn add_fetch_data_request(origin: OriginFor<T>, url: Vec<u8>) -> DispatchResult {
+		pub fn add_fetch_data_request(_origin: OriginFor<T>, url: Vec<u8>) -> DispatchResult {
 			let index = DataId::<T>::get();
 			DataId::<T>::put(index + 1u64);
 			<RequestedOffchainData<T>>::insert(index, DataInfo {
