@@ -211,6 +211,16 @@ pub mod pallet {
 			Ok(().into())
 		}
 
+
+		/// An example dispatchable that may throw a custom error.
+		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1))]
+		pub fn sample_request(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
+			let _who = ensure_signed(origin)?;
+			log::info!("called a sample request....!");
+			Ok(().into())
+		}
+
+
 		/// An example dispatchable that may throw a custom error.
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1))]
 		pub fn cause_error(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
