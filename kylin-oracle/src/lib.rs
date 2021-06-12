@@ -8,8 +8,6 @@ pub use pallet::*;
 // 	self as system,
 // };
 
-#[cfg(test)]
-mod mock;
 
 #[cfg(test)]
 mod tests;
