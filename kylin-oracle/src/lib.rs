@@ -73,6 +73,7 @@ mod benchmarking;
 pub mod pallet {
 	use frame_support::{log, dispatch::DispatchResultWithPostInfo, pallet_prelude::*};
 	use frame_system::pallet_prelude::*;
+	use frame_system::Config as SystemConfig;
 	use codec::{Decode, Encode};
 	use sp_std::str;
 	use sp_std::vec::Vec;
@@ -87,6 +88,11 @@ pub mod pallet {
 		offchain::{http, Duration},
 	};
 
+	use cumulus_primitives_core::ParaId;
+	use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para};
+	use xcm::v0::{Xcm, Error as XcmError, SendXcm, OriginKind, MultiLocation, Junction};
+
+
 
 	#[derive(Encode, Decode, Default, PartialEq, Eq)]
 	#[cfg_attr(feature = "std", derive(Debug))]
@@ -100,11 +106,17 @@ pub mod pallet {
 		/// The identifier type for an offchain worker.
 		type AuthorityId: AppCrypto<Self::Public, Self::Signature>;
 
+		type Origin: From<<Self as SystemConfig>::Origin> + Into<Result<CumulusOrigin, <Self as Config>::Origin>>;
+
+
 		/// The overarching event type.
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 
 		/// The overarching dispatch call type.
-		type Call: From<Call<Self>>;
+		type Call: From<Call<Self>> + Encode;
+
+		type XcmSender: SendXcm;
+
 	}
 
 	/// Payload used by this example crate to hold price
@@ -146,6 +158,12 @@ pub mod pallet {
 		/// Event documentation should end with an array that provides descriptive names for event
 		/// parameters. [data, who]
 		FetchedOffchainData(u64, T::AccountId),
+
+		FetchedOffchainDataViaXCM(ParaId, u32, Vec<u8>),
+		RequestedOffchainDataViaXCM(ParaId, u32, Vec<u8>),
+
+		ErrorRequestingData(XcmError, ParaId, u32, Vec<u8>),
+		ErrorFetchingData(XcmError, ParaId, u32, Vec<u8>),
 	}
 
 	// Errors inform users that something went wrong.
@@ -205,6 +223,7 @@ pub mod pallet {
 				data: data,
 			});
 
+
 			// Emit an event.
 			Self::deposit_event(Event::FetchedOffchainData(index, who));
 			// Return a successful DispatchResultWithPostInfo
@@ -230,12 +249,53 @@ pub mod pallet {
 			}
 		}
 
-		/// An example dispatchable that may throw a custom error.
-		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1))]
-		pub fn sample_call(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
-			log::info!("*************** Test Call! ***************");
-			Ok(().into())
+		#[pallet::weight(0)]
+		pub fn request_offchain_data_cross_chain(origin: OriginFor<T>, seq: u32, data: Vec<u8>) -> DispatchResult {
+			let para = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
+			log::info!("************** request off chain data ****************");
+			log::info!("Paraid value is {:?}", para);
+			log::info!("Data value is {}", str::from_utf8(&data).unwrap());
+			match T::XcmSender::send_xcm(
+				MultiLocation::X2(Junction::Parent, Junction::Parachain(para.into())),
+				Xcm::Transact {
+					origin_type: OriginKind::Native,
+					require_weight_at_most: 1_000,
+					call: <T as Config>::Call::from(Call::<T>::fetch_offchain_data_cross_chain(seq, data.clone())).encode().into(),
+				},
+			) {
+				Ok(()) => Self::deposit_event(Event::RequestedOffchainDataViaXCM(para,seq, data)),
+				Err(e) => Self::deposit_event(Event::ErrorRequestingData(e, para, seq, data)),
+			}
+
+
+			Ok(())
 		}
+
+		#[pallet::weight(0)]
+		fn fetch_offchain_data_cross_chain(origin: OriginFor<T>, seq: u32, data: Vec<u8>) -> DispatchResult {
+			// Only accept pings from other chains.
+			let para = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
+			log::info!("************** fetch off chain data ****************");
+			log::info!("Paraid value of caller is {:?}", para);
+			log::info!("Data value passed is {}", str::from_utf8(&data).unwrap());
+
+			let url = "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD";
+			let res = Self::fetch_http_get_result(url).unwrap_or("Failed fetch data".as_bytes().to_vec());
+
+			match T::XcmSender::send_xcm(
+				MultiLocation::X2(Junction::Parent, Junction::Parachain(para.into())),
+				Xcm::Transact {
+					origin_type: OriginKind::Native,
+					require_weight_at_most: 1_000,
+					call: <T as Config>::Call::from(Call::<T>::request_offchain_data_cross_chain(seq, res.clone())).encode().into(),
+				},
+			) {
+				Ok(()) => Self::deposit_event(Event::FetchedOffchainDataViaXCM(para,seq, data)),
+				Err(e) => Self::deposit_event(Event::ErrorFetchingData(e, para, seq, data)),
+			}
+			Ok(())
+		}
+
 
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1))]
 		pub fn add_fetch_data_request(_origin: OriginFor<T>, url: Vec<u8>) -> DispatchResult {
