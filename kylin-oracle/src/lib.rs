@@ -258,7 +258,7 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(0)]
-		fn fetch_offchain_data_cross_chain(origin: OriginFor<T>, para: ParaId, data: Vec<u8>) -> DispatchResult
+		pub fn fetch_offchain_data_cross_chain(origin: OriginFor<T>, para: ParaId, data: Vec<u8>) -> DispatchResult
 		{
 			log::info!("******************* fetch offchain data *******************");
 			let para_id = ParaId::from(para).into();
