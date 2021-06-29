@@ -4,12 +4,6 @@
 /// Learn more about FRAME and the core library of Substrate FRAME pallets:
 /// <https://substrate.dev/docs/en/knowledgebase/runtime/frame>
 pub use pallet::*;
-// use frame_system::{
-// 	self as system,
-// };
-
-#[cfg(test)]
-mod mock;
 
 #[cfg(test)]
 mod tests;
@@ -58,13 +52,6 @@ pub mod crypto {
 		type GenericPublic = sp_core::sr25519::Public;
 	}
 }
-
-
-#[cfg(test)]
-mod mock;
-
-#[cfg(test)]
-mod tests;
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
