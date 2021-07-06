@@ -228,7 +228,7 @@ pub mod pallet {
 
 
 			match T::XcmSender::send_xcm(
-				MultiLocation::X1(Junction::Parachain(para_id)),
+				MultiLocation::X2(Junction::Parent, Junction::Parachain(para_id)),
 				Xcm::Transact {
 					origin_type: OriginKind::Native,
 					require_weight_at_most: 1_000,
