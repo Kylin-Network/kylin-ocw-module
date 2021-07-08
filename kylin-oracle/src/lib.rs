@@ -75,10 +75,7 @@ pub mod pallet {
 		offchain::{http, Duration},
 	};
 	use cumulus_primitives_core::ParaId;
-	use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para, Origin};
 	use xcm::v0::{Xcm, Error as XcmError, SendXcm, OriginKind, MultiLocation, Junction};
-	use cumulus_primitives_core::relay_chain::v1::Id;
-
 
 	#[derive(Encode, Decode, Default, PartialEq, Eq)]
 	#[cfg_attr(feature = "std", derive(Debug))]
@@ -219,7 +216,7 @@ pub mod pallet {
 
 
 		#[pallet::weight(0)]
-		pub fn request_offchain_data_cross_chain(origin: OriginFor<T>, para: ParaId, data: Vec<u8>) -> DispatchResult
+		pub fn request_offchain_data_cross_chain(_origin: OriginFor<T>, para: ParaId, data: Vec<u8>) -> DispatchResult
 		{
 			log::info!("******************* request offchain data *******************");
 			let para_id = ParaId::from(para).into();
@@ -245,14 +242,14 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(0)]
-		pub fn fetch_offchain_data_cross_chain(origin: OriginFor<T>, para: ParaId, data: Vec<u8>) -> DispatchResult
+		pub fn fetch_offchain_data_cross_chain(_origin: OriginFor<T>, para: ParaId, data: Vec<u8>) -> DispatchResult
 		{
 			log::info!("******************* fetch offchain data *******************");
 			let para_id = ParaId::from(para).into();
 
 			log::info!("test value is {:?}", para_id);
 			log::info!("Data value is {}", str::from_utf8(&data).unwrap());
-			let url = "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD";
+			// let url = "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD";
 			// let res = Self::fetch_http_get_result(url).unwrap_or("Failed fetch data".as_bytes().to_vec());
 			// Self::send_xcm(origin_location.clone(), dest.clone(), message.clone())
 
