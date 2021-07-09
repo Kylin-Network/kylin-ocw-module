@@ -75,6 +75,7 @@ pub mod pallet {
 		offchain::{http, Duration},
 	};
 	use cumulus_primitives_core::ParaId;
+	use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para};
 	use xcm::v0::{Xcm, Error as XcmError, SendXcm, OriginKind, MultiLocation, Junction};
 
 	#[derive(Encode, Decode, Default, PartialEq, Eq)]
@@ -89,8 +90,8 @@ pub mod pallet {
 		/// The identifier type for an offchain worker.
 		type AuthorityId: AppCrypto<Self::Public, Self::Signature>;
 
-		// type Origin: From<<Self as SystemConfig>::Origin> + Into<Result<CumulusOrigin, <Self as Config>::Origin>>;
-		type Origin: From<<Self as SystemConfig>::Origin>;
+		type Origin: From<<Self as SystemConfig>::Origin> + Into<Result<CumulusOrigin, <Self as Config>::Origin>>;
+		// type Origin: From<<Self as SystemConfig>::Origin>;
 
 
 		/// The overarching event type.
@@ -220,7 +221,7 @@ pub mod pallet {
 		{
 			log::info!("******************* request offchain data *******************");
 			let para_id = ParaId::from(para).into();
-			log::info!("test value is {:?}", para_id);
+			log::info!("target parachain id is {:?}", para_id);
 			log::info!("Data value is {}", str::from_utf8(&data).unwrap());
 
 
@@ -242,19 +243,18 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(0)]
-		pub fn fetch_offchain_data_cross_chain(_origin: OriginFor<T>, para: ParaId, data: Vec<u8>) -> DispatchResult
+		pub fn fetch_offchain_data_cross_chain(origin: OriginFor<T>, para: ParaId, data: Vec<u8>) -> DispatchResult
 		{
 			log::info!("******************* fetch offchain data *******************");
-			let para_id = ParaId::from(para).into();
-
-			log::info!("test value is {:?}", para_id);
+			let para_id:u32 = ParaId::from(para).into();
+			let origin_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
+		
+			log::info!("target para id value is {:?}", para_id);
+			log::info!("origin para id value is {:?}", origin_para_id);
 			log::info!("Data value is {}", str::from_utf8(&data).unwrap());
-			// let url = "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD";
-			// let res = Self::fetch_http_get_result(url).unwrap_or("Failed fetch data".as_bytes().to_vec());
-			// Self::send_xcm(origin_location.clone(), dest.clone(), message.clone())
 
 			match T::XcmSender::send_xcm(
-				MultiLocation::X2(Junction::Parent, Junction::Parachain(para_id)),
+				MultiLocation::X2(Junction::Parent, Junction::Parachain(origin_para_id.into())),
 				Xcm::Transact {
 					origin_type: OriginKind::Native,
 					require_weight_at_most: 1_000,
