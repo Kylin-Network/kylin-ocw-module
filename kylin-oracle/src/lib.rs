@@ -1,5 +1,4 @@
 #![cfg_attr(not(feature = "std"), no_std)]
-
 /// Edit this file to define custom logic or remove it if it is not needed.
 /// Learn more about FRAME and the core library of Substrate FRAME pallets:
 /// <https://substrate.dev/docs/en/knowledgebase/runtime/frame>
@@ -11,9 +10,7 @@ mod tests;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 
-
 use sp_core::crypto::KeyTypeId;
-
 
 /// Defines application identifier for crypto keys of this module.
 ///
@@ -24,7 +21,6 @@ use sp_core::crypto::KeyTypeId;
 /// The keys can be inserted manually via RPC (see `author_insertKey`).
 /// ocpf mean off-chain worker price fetch
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"ocpf");
-
 
 /// Based on the above `KeyTypeId` we need to generate a pallet-specific crypto type wrappers.
 /// We can use from supported crypto kinds (`sr25519`, `ed25519` and `ecdsa`) and augment
@@ -64,25 +60,44 @@ pub mod pallet {
 	use codec::{Decode, Encode};
 	use sp_std::str;
 	use sp_std::vec::Vec;
+	use sp_std::borrow::ToOwned;
 	use frame_support::storage::IterableStorageMap;
 	use frame_system::{
 		self as system,
 		offchain::{
-			AppCrypto, CreateSignedTransaction, SendSignedTransaction, Signer,SignedPayload,SigningTypes,
+			AppCrypto, CreateSignedTransaction, SendSignedTransaction, Signer,SignedPayload,SigningTypes,SubmitTransaction
 		}
 	};
 	use sp_runtime::{
-		offchain::{http, Duration},
+		traits::Zero,
+		offchain::{http, Duration, storage::{MutateStorageError, StorageRetrievalError, StorageValueRef}},
 	};
+	
 	use cumulus_primitives_core::ParaId;
 	use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para};
-	use xcm::v0::{Xcm, Error as XcmError, SendXcm, OriginKind, MultiLocation, Junction};
+	use xcm::v0::{Error as XcmError, SendXcm};
 
 	#[derive(Encode, Decode, Default, PartialEq, Eq)]
 	#[cfg_attr(feature = "std", derive(Debug))]
 	pub struct DataInfo {
 		url: Vec<u8>,
 		data: Vec<u8>,
+	}
+
+	#[derive(Encode, Decode, Default, PartialEq, Eq)]
+	#[cfg_attr(feature = "std", derive(Debug))]
+	pub struct PriceFeedingData {
+		para_id: ParaId,
+		currencies: Vec<u8>,
+		payload: Vec<u8>,
+	}
+
+	enum TransactionType {
+		Signed,
+		UnsignedForAny,
+		UnsignedForAll,
+		Raw,
+		None,
 	}
 
 	#[pallet::config]
@@ -93,7 +108,6 @@ pub mod pallet {
 		type Origin: From<<Self as SystemConfig>::Origin> + Into<Result<CumulusOrigin, <Self as Config>::Origin>>;
 		// type Origin: From<<Self as SystemConfig>::Origin>;
 
-
 		/// The overarching event type.
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 
@@ -102,6 +116,14 @@ pub mod pallet {
 
 		type XcmSender: SendXcm;
 
+		/// A configuration for base priority of unsigned transactions.
+		///
+		/// This is exposed so that it can be tuned for particular runtime, when
+		/// multiple pallets send unsigned transactions.
+		#[pallet::constant]
+		type UnsignedPriority: Get<TransactionPriority>;
+
+
 	}
 
 	/// Payload used by this example crate to hold price
@@ -109,7 +131,9 @@ pub mod pallet {
 	#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug)]
 	pub struct PricePayload<Public, BlockNumber> {
 		block_number: BlockNumber,
-		price: u32,
+		para_id: ParaId,
+		currencies: Vec<u8>,
+		response: Vec<u8>,
 		public: Public,
 	}
 
@@ -125,7 +149,7 @@ pub mod pallet {
 
 	#[pallet::type_value]
 	pub fn InitialDataId<T: Config>() -> u64 { 10000000u64 }
-
+	
 	#[pallet::storage]
 	// pub type DataId<T: Config> = StorageValue<_, u64>;
 	pub type DataId<T: Config> =	StorageValue<_, u64, ValueQuery, InitialDataId<T>>;
@@ -135,6 +159,20 @@ pub mod pallet {
 	// Learn more about declaring storage items:
 	// https://substrate.dev/docs/en/knowledgebase/runtime/storage#declaring-storage-items
 	pub type RequestedOffchainData<T: Config> = StorageMap<_, Identity, u64, DataInfo, ValueQuery>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn price_feeding_requests)]
+	pub type PriceFeedingRequests<T: Config> = StorageMap<_, Identity, u64, PriceFeedingData, ValueQuery>;
+
+
+	#[pallet::storage]
+	#[pallet::getter(fn saved_price_feeding_requests)]
+	pub type SavedPriceFeedingRequests<T: Config> = StorageMap<_, Identity, u64, PriceFeedingData, ValueQuery>;
+
+
+	#[pallet::storage]
+	#[pallet::getter(fn next_unsigned_at)]
+	pub(super) type NextUnsignedAt<T: Config> = StorageValue<_, T::BlockNumber, ValueQuery>;
 
 	#[pallet::event]
 	#[pallet::metadata(T::AccountId = "AccountId")]
@@ -146,9 +184,35 @@ pub mod pallet {
 
 		FetchedOffchainDataViaXCM(ParaId, Vec<u8>),
 		RequestedOffchainDataViaXCM(ParaId, Vec<u8>),
+		RequestPriceFeed(ParaId, Vec<u8>),
+		ProcessedPriceFeedRequest(ParaId, Vec<u8>, Vec<u8>,),
 
 		ErrorRequestingData(XcmError, ParaId, Vec<u8>),
 		ErrorFetchingData(XcmError, ParaId, Vec<u8>),
+	}
+
+	#[pallet::validate_unsigned]
+	impl<T: Config> ValidateUnsigned for Pallet<T> {
+		type Call = Call<T>;
+
+		/// Validate unsigned call to this module.
+		///
+		/// By default unsigned transactions are disallowed, but implementing the validator
+		/// here we make sure that some particular calls (the ones produced by offchain worker)
+		/// are being whitelisted and marked as valid.
+		fn validate_unsigned(
+			_source: TransactionSource,
+			call: &Self::Call,
+		) -> TransactionValidity {
+			if let Call::submit_price_request_unsigned(block_number,_key, _data) = call {
+					Self::validate_transaction(block_number)
+				} else if let Call::clear_processed_requests_unsigned(block_number,_processed_requests) = call {
+					Self::validate_transaction(block_number)
+				}
+				else {
+					InvalidTransaction::Call.into()
+				}
+		}
 	}
 
 	// // Errors inform users that something went wrong.
@@ -159,7 +223,6 @@ pub mod pallet {
 	// 	/// Errors should have helpful documentation associated with them.
 	// 	StorageOverflow,
 	// }
-
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 
@@ -168,12 +231,7 @@ pub mod pallet {
 			// significantly. You can use `RuntimeDebug` custom derive to hide details of the types
 			// in WASM. The `sp-api` crate also provides a feature `disable-logging` to disable
 			// all logging and thus, remove any logging from the WASM.
-			log::info!("Hello World from offchain workers!");
 
-			// Since off-chain workers are just part of the runtime code, they have direct access
-			// to the storage and other included pallets.
-			//
-			// We can easily import `frame_system` and retrieve a block hash of the parent block.
 			let parent_hash = <system::Pallet<T>>::block_hash(block_number - 1u32.into());
 			log::debug!("Current block: {:?} (parent hash: {:?})", block_number, parent_hash);
 
@@ -181,10 +239,18 @@ pub mod pallet {
 			// of the code to separate `impl` block.
 			// Here we call a helper function to calculate current average price.
 			// This function reads storage entries of the current state.
-			let res = Self::fetch_data_and_send_signed();
+
+
+			let should_send = Self::choose_transaction_type(block_number);
+			let res = match should_send {
+				TransactionType::Signed => Self::fetch_data_and_send_signed(),
+				TransactionType::Raw |TransactionType::UnsignedForAll | TransactionType::UnsignedForAny  => Self::fetch_data_and_send_raw_unsigned(block_number),
+				_ => Ok(()),
+			};
 			if let Err(e) = res {
 				log::error!("Error: {}", e);
 			}
+
 		}
 	}
 
@@ -193,81 +259,95 @@ pub mod pallet {
 	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		/// An example dispatchable that takes a singles value as a parameter, writes the value to
-		/// storage and emits an event. This function must be dispatched by a signed extrinsic.
+
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn submit_request_data(origin: OriginFor<T>, index: u64, data: Vec<u8>) -> DispatchResultWithPostInfo {
+		pub fn submit_request_data(origin: OriginFor<T>, key: u64, data: Vec<u8>) -> DispatchResult {
 			// Check that the extrinsic was signed and get the signer.
 			// This function will return an error if the extrinsic is not signed.
 			// https://substrate.dev/docs/en/knowledgebase/runtime/origin
-			let who = ensure_signed(origin)?;
+			let who = ensure_signed(origin.clone())?;
+			Self::save_data_onchain(key, data);
+			Self::deposit_event(Event::FetchedOffchainData(key, who));
+			Ok(())
+		}
 
-			let info = Self::requested_offchain_data(index);
-			<RequestedOffchainData<T>>::insert(index, DataInfo {
-				url: info.url,
-				data: data,
+		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
+		pub fn submit_price_request_unsigned(origin: OriginFor<T>,_block_number: T::BlockNumber, key: u64,data: Vec<u8>) -> DispatchResult {
+			log::info!("Submit was called with key {} and data {} ", key, str::from_utf8(&data).unwrap());
+			ensure_none(origin.clone())?;
+			Self::save_data_response_onchain(key, data);
+			Ok(())
+		}
+
+
+		#[pallet::weight(0)]
+		pub fn request_price_feed(_origin: OriginFor<T>,  requester_para_id:ParaId, requested_currencies: Vec<u8>) -> DispatchResult
+		{
+			log::info!("******************* price feeds *******************");
+			log::info!("Requested currencies are {}", str::from_utf8(&requested_currencies).unwrap());
+			let index = DataId::<T>::get();
+			DataId::<T>::put(index + 1u64);
+			<PriceFeedingRequests<T>>::insert(index, PriceFeedingData {
+				para_id: requester_para_id,
+				currencies: requested_currencies.clone(),
+				payload: Vec::new(),
+			});
+			
+			Self::deposit_event(Event::RequestPriceFeed(requester_para_id, requested_currencies.clone()));
+			Ok(())
+		}
+
+
+		#[pallet::weight(0)]
+		pub fn request_price_feed_via_xcm(origin: OriginFor<T>,  requested_currencies: Vec<u8>) -> DispatchResult
+		{
+			log::info!("******************* price feeds via xcm *******************");
+			let requester_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
+			log::info!("Parachain {:?} requested currencies are {}", requester_para_id, str::from_utf8(&requested_currencies).unwrap());
+			let index = DataId::<T>::get();
+			DataId::<T>::put(index + 1u64);
+			<PriceFeedingRequests<T>>::insert(index, PriceFeedingData {
+				para_id: requester_para_id,
+				currencies: requested_currencies.clone(),
+				payload: Vec::new(),
 			});
 
+			let price_feeding_request = Self::price_feeding_requests(index);
+			log::info!("Key at request is {}", index);
+			log::info!("************ at request_via_xcm - queried data store Parachain {:?} requested currencies are {}", price_feeding_request.para_id, str::from_utf8(&price_feeding_request.currencies).unwrap());
 
-			// Emit an event.
-			Self::deposit_event(Event::FetchedOffchainData(index, who));
-			// Return a successful DispatchResultWithPostInfo
+			Self::deposit_event(Event::RequestPriceFeed(requester_para_id, requested_currencies.clone()));
+
+			Ok(())
+		}
+
+		#[pallet::weight(0 + T::DbWeight::get().writes(1))]
+		pub fn clear_processed_requests_unsigned(
+			origin: OriginFor<T>,
+			_block_number: T::BlockNumber,
+			processed_requests: Vec<u64>
+		) -> DispatchResultWithPostInfo {
+			// This ensures that the function can only be called via unsigned transaction.
+			ensure_none(origin)?;
+
+			for key in processed_requests.iter(){
+
+				let saved_request = Self::price_feeding_requests(key);
+
+				let price_feeding_request = Self::price_feeding_requests(key);
+				log::info!("Key at clearing requests is {}", key);
+				log::info!("************ at clear processing - queried data store Parachain {:?} requested currencies are {}", price_feeding_request.para_id, str::from_utf8(&price_feeding_request.currencies).unwrap());
+	
+				log::info!("Processed price feeding request {} for parachain {:?}, currencies requested ......{:?}. Returned data {:?}", &key,&saved_request.para_id,&saved_request.currencies, &saved_request.payload );
+				Self::deposit_event(Event::ProcessedPriceFeedRequest(saved_request.para_id, saved_request.currencies.clone(), saved_request.payload.clone()));
+				let current_block = <system::Pallet<T>>::block_number();
+				<PriceFeedingRequests<T>>::remove(&key);
+				log::info!("Removed request for key {}. ", key);
+				log::info!("Price feeding requests count {}",<PriceFeedingRequests<T>>::iter().count() );
+				<NextUnsignedAt<T>>::put(current_block);
+			}
 			Ok(().into())
 		}
-
-
-		#[pallet::weight(0)]
-		pub fn request_offchain_data_cross_chain(_origin: OriginFor<T>, para: ParaId, data: Vec<u8>) -> DispatchResult
-		{
-			log::info!("******************* request offchain data *******************");
-			let para_id = ParaId::from(para).into();
-			log::info!("target parachain id is {:?}", para_id);
-			log::info!("Data value is {}", str::from_utf8(&data).unwrap());
-
-
-			match T::XcmSender::send_xcm(
-				MultiLocation::X2(Junction::Parent, Junction::Parachain(para_id)),
-				Xcm::Transact {
-					origin_type: OriginKind::Native,
-					require_weight_at_most: 1_000,
-					call: <T as Config>::Call::from(Call::<T>::fetch_offchain_data_cross_chain(para, data.clone())).encode().into(),
-				},
-			) {
-				Ok(()) => Self::deposit_event(Event::RequestedOffchainDataViaXCM(para, data)),
-				Err(e) => Self::deposit_event(Event::ErrorRequestingData(e, para, data)),
-			}
-
-			log::info!("**** XCM sent");
-
-			Ok(())
-		}
-
-		#[pallet::weight(0)]
-		pub fn fetch_offchain_data_cross_chain(origin: OriginFor<T>, para: ParaId, data: Vec<u8>) -> DispatchResult
-		{
-			log::info!("******************* fetch offchain data *******************");
-			let para_id:u32 = ParaId::from(para).into();
-			let origin_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
-		
-			log::info!("target para id value is {:?}", para_id);
-			log::info!("origin para id value is {:?}", origin_para_id);
-			log::info!("Data value is {}", str::from_utf8(&data).unwrap());
-
-			match T::XcmSender::send_xcm(
-				MultiLocation::X2(Junction::Parent, Junction::Parachain(origin_para_id.into())),
-				Xcm::Transact {
-					origin_type: OriginKind::Native,
-					require_weight_at_most: 1_000,
-					call: <T as Config>::Call::from(Call::<T>::request_offchain_data_cross_chain(para, data.clone())).encode().into(),
-				},
-			) {
-				Ok(()) => Self::deposit_event(Event::FetchedOffchainDataViaXCM(para, data)),
-				Err(e) => Self::deposit_event(Event::ErrorFetchingData(e, para, data)),
-			}
-			Ok(())
-		}
-
-
 
 
 		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1))]
@@ -281,13 +361,97 @@ pub mod pallet {
 
 			Ok(())
 		}
-
-
-
 	}
 
-
 	impl<T: Config> Pallet<T> {
+		fn choose_transaction_type(block_number: T::BlockNumber) -> TransactionType {
+			/// A friendlier name for the error that is going to be returned in case we are in the grace
+			/// period.
+			const RECENTLY_SENT: () = ();
+	
+			// Start off by creating a reference to Local Storage value.
+			// Since the local storage is common for all offchain workers, it's a good practice
+			// to prepend your entry with the module name.
+			let val = StorageValueRef::persistent(b"kylin_oracle::last_send");
+			// The Local Storage is persisted and shared between runs of the offchain workers,
+			// and offchain workers may run concurrently. We can use the `mutate` function, to
+			// write a storage entry in an atomic fashion. Under the hood it uses `compare_and_set`
+			// low-level method of local storage API, which means that only one worker
+			// will be able to "acquire a lock" and send a transaction if multiple workers
+			// happen to be executed concurrently.
+			let res = val.mutate(|last_send: Result<Option<T::BlockNumber>, StorageRetrievalError>| {
+				match last_send {
+					// If we already have a value in storage and the block number is recent enough
+					// we avoid sending another transaction at this time.
+					Ok(Some(block)) if block_number < block => {
+						Err(RECENTLY_SENT)
+					},
+					// In every other case we attempt to acquire the lock and send a transaction.
+					_ => Ok(block_number)
+				}
+			});
+	
+			// The result of `mutate` call will give us a nested `Result` type.
+			// The first one matches the return of the closure passed to `mutate`, i.e.
+			// if we return `Err` from the closure, we get an `Err` here.
+			// In case we return `Ok`, here we will have another (inner) `Result` that indicates
+			// if the value has been set to the storage correctly - i.e. if it wasn't
+			// written to in the meantime.
+			match res {
+				// The value has been set correctly, which means we can safely send a transaction now.
+				Ok(block_number) => {
+					// Depending if the block is even or odd we will send a `Signed` or `Unsigned`
+					// transaction.
+					// Note that this logic doesn't really guarantee that the transactions will be sent
+					// in an alternating fashion (i.e. fairly distributed). Depending on the execution
+					// order and lock acquisition, we may end up for instance sending two `Signed`
+					// transactions in a row. If a strict order is desired, it's better to use
+					// the storage entry for that. (for instance store both block number and a flag
+					// indicating the type of next transaction to send).
+					let transaction_type = block_number % 3u32.into();
+					if transaction_type == Zero::zero() { TransactionType::Signed }
+					else if transaction_type == T::BlockNumber::from(1u32) { TransactionType::UnsignedForAny }
+					else if transaction_type == T::BlockNumber::from(2u32) { TransactionType::UnsignedForAll }
+					else { TransactionType::Raw }
+				},
+				// We are in the grace period, we should not send a transaction this time.
+				Err(MutateStorageError::ValueFunctionFailed(RECENTLY_SENT)) => TransactionType::None,
+				// We wanted to send a transaction, but failed to write the block number (acquire a
+				// lock). This indicates that another offchain worker that was running concurrently
+				// most likely executed the same logic and succeeded at writing to storage.
+				// Thus we don't really want to send the transaction, knowing that the other run
+				// already did.
+				Err(MutateStorageError::ConcurrentModification(_)) => TransactionType::None,
+			}
+		}
+
+		fn save_data_onchain( key: u64,data: Vec<u8>) -> ()  {
+			let info = Self::requested_offchain_data(key);
+			<RequestedOffchainData<T>>::insert(key, DataInfo {
+				url: info.url,
+				data: data,
+			});
+			
+		}
+
+		fn save_data_response_onchain( key: u64,response: Vec<u8>) -> ()  {
+			let price_feeding_data = Self::price_feeding_requests(key);
+			<SavedPriceFeedingRequests<T>>::insert(key, PriceFeedingData {
+				para_id: price_feeding_data.para_id,
+				currencies: price_feeding_data.currencies.clone(),
+				payload: response.clone(),
+			});
+			
+			let price_feeding_request = Self::price_feeding_requests(key);
+			log::info!("Key at saving-onchain is {}", key);
+			log::info!("************ at saving onchain - requested info - Parachain {:?} requested currencies are {}", price_feeding_request.para_id, str::from_utf8(&price_feeding_request.currencies).unwrap());
+
+
+			let saved_price_feeding_request = Self::saved_price_feeding_requests(key);
+			log::info!("************ at saving onchain - saved info - Parachain {:?} requested currencies are {} and response is {}", saved_price_feeding_request.para_id, str::from_utf8(&saved_price_feeding_request.currencies).unwrap(), str::from_utf8(&saved_price_feeding_request.payload.clone()).unwrap());
+
+		}
+
 		/// A helper function to fetch the price and send signed transaction.
 		fn fetch_data_and_send_signed() -> Result<(), &'static str> {
 			let signer = Signer::<T, T::AuthorityId>::all_accounts();
@@ -296,18 +460,13 @@ pub mod pallet {
 					"No local accounts available. Consider adding one via `author_insertKey` RPC.",
 				)?;
 			}
-			log::info!("range RequestedOffchainData");
+			let mut processed_requests: Vec<u64>  = Vec::new();
 			for (key, val) in <RequestedOffchainData<T> as IterableStorageMap<u64, DataInfo>>::iter() {
 				let url = str::from_utf8(&val.url).unwrap();
 				log::info!("with RequestedOffchainData: {}, {}", key, url);
-				let res = Self::fetch_http_get_result(url).unwrap_or("Failed fetch data".as_bytes().to_vec());
-				log::info!("set val.data: {}", str::from_utf8(&res).unwrap());
-
-				// Using `send_signed_transaction` associated type we create and submit a transaction
-				// representing the call, we've just created.
-				// Submit signed will return a vector of results for all accounts that were found in the
-				// local keystore with expected `KEY_TYPE`.
-				let results = signer.send_signed_transaction(|_account| Call::submit_request_data(key, res.clone()));
+				let response = Self::fetch_http_get_result(url).unwrap_or("Failed fetch data".as_bytes().to_vec());
+				processed_requests.push(key);
+				let results = signer.send_signed_transaction(|_account| Call::submit_request_data(key, response.clone()));
 				for (acc, res) in &results {
 					match res {
 						Ok(()) => log::info!("[{:?}] Submitted data {}", acc.id, key),
@@ -316,6 +475,51 @@ pub mod pallet {
 				}
 			}
 
+			Ok(())
+		}
+
+		fn fetch_data_and_send_raw_unsigned(block_number: T::BlockNumber) -> Result<(), &'static str> {
+			let next_unsigned_at = <NextUnsignedAt<T>>::get();
+			if next_unsigned_at > block_number {
+				return Err("Too early to send unsigned transaction")
+			}
+			
+			let mut processed_requests: Vec<u64>  = Vec::new();
+			let test = <PriceFeedingRequests<T> as IterableStorageMap<u64, PriceFeedingData>>::iter();
+			log::info!("amount of keys in price feeding is {}", test.count());
+			
+			for (key, val) in <PriceFeedingRequests<T> as IterableStorageMap<u64, PriceFeedingData>>::iter() {
+				let parachain_id =&val.para_id;
+				let currencies = str::from_utf8(&val.currencies).unwrap();
+				let split_currencies:Vec<&str> = currencies.split("_").collect();
+				let api_url = str::from_utf8(b"https://min-api.cryptocompare.com/data/price?fsym=").unwrap();
+				let url = api_url.clone().to_owned() + split_currencies[0].clone() + "&tsyms=" + &split_currencies[1].clone();
+
+				log::info!("Running price feeding request  {}  for parachain {:?}, currencies requested.... {}", key,parachain_id,currencies );
+				let response = Self::fetch_http_get_result(&url.clone()).unwrap_or("Failed fetch data".as_bytes().to_vec());
+				let key_exists = <PriceFeedingRequests<T>>::contains_key(key);
+				log::info!("Key exists in price feeding queue {}", key_exists);
+				if <PriceFeedingRequests<T>>::contains_key(key) {
+					log::info!("processed requests {}", key);
+					processed_requests.push(key);
+				
+				log::info!("Call to save data onchain.........");
+				let result = SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(Call::submit_price_request_unsigned(block_number,key, response).into());
+				if let Err(e) = result {
+					log::error!("Error submitting unsigned transaction: {:?}", e);
+				}
+			}
+			}
+
+			log::info!("Processed queue count is {}",processed_requests.len());
+
+			if processed_requests.len() > 0 {
+			log::info!("Process requests is greater than 0 so starting to process requests");
+			let result = SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(Call::clear_processed_requests_unsigned(block_number, processed_requests).into());
+			if let Err(e) = result {
+				log::error!("Error clearing queue: {:?}", e);
+			}
+		}
 			Ok(())
 		}
 
@@ -369,5 +573,81 @@ pub mod pallet {
 
 			Ok(body_str.as_bytes().to_vec())
 		}
+	
+		
+	// fn validate_transaction_parameters(
+	// 	block_number: &T::BlockNumber,
+	// 	data: Vec<u8>,
+	// ) -> TransactionValidity {
+	// 	// Now let's check if the transaction has any chance to succeed.
+	// 	let next_unsigned_at = <NextUnsignedAt<T>>::get();
+	// 	if &next_unsigned_at > block_number {
+	// 		return InvalidTransaction::Stale.into();
+	// 	}
+	// 	// Let's make sure to reject transactions from the future.
+	// 	let current_block = <system::Pallet<T>>::block_number();
+	// 	if &current_block < block_number {
+	// 		return InvalidTransaction::Future.into();
+	// 	}
+
+	// 	// We prioritize transactions that are more far away from current average.
+	// 	//
+	// 	// Note this doesn't make much sense when building an actual oracle, but this example
+	// 	// is here mostly to show off offchain workers capabilities, not about building an
+	// 	// oracle.
+
+
+	// 	ValidTransaction::with_tag_prefix("Kylin OCW")
+	// 		// We set base priority to 2**20 and hope it's included before any other
+	// 		// transactions in the pool. Next we tweak the priority depending on how much
+	// 		// it differs from the current average. (the more it differs the more priority it
+	// 		// has).
+	// 		.priority(T::UnsignedPriority::get().saturating_add(data as _))
+	// 		// This transaction does not require anything else to go before into the pool.
+	// 		// In theory we could require `previous_unsigned_at` transaction to go first,
+	// 		// but it's not necessary in our case.
+	// 		//.and_requires()
+	// 		// We set the `provides` tag to be the same as `next_unsigned_at`. This makes
+	// 		// sure only one transaction produced after `next_unsigned_at` will ever
+	// 		// get to the transaction pool and will end up in the block.
+	// 		// We can still have multiple transactions compete for the same "spot",
+	// 		// and the one with higher priority will replace other one in the pool.
+	// 		.and_provides(next_unsigned_at)
+	// 		// The transaction is only valid for next 5 blocks. After that it's
+	// 		// going to be revalidated by the pool.
+	// 		.longevity(5)
+	// 		// It's fine to propagate that transaction to other peers, which means it can be
+	// 		// created even by nodes that don't produce blocks.
+	// 		// Note that sometimes it's better to keep it for yourself (if you are the block
+	// 		// producer), since for instance in some schemes others may copy your solution and
+	// 		// claim a reward.
+	// 		.propagate(true)
+	// 		.build()
+	// }
+	
+
+
+	fn validate_transaction(block_number: &T::BlockNumber) -> TransactionValidity {
+
+		// Now let's check if the transaction has any chance to succeed.
+		let next_unsigned_at = <NextUnsignedAt<T>>::get();
+		if &next_unsigned_at > block_number {
+			return InvalidTransaction::Stale.into();
+		}
+		// Let's make sure to reject transactions from the future.
+		let current_block = <system::Pallet<T>>::block_number();
+		if &current_block < block_number {
+			return InvalidTransaction::Future.into();
+		}
+
+
+		ValidTransaction::with_tag_prefix("Kylin OCW")
+			.priority(T::UnsignedPriority::get())
+			.longevity(5)
+			.propagate(true)
+			.build()
+	
 	}
 }
+}
+
