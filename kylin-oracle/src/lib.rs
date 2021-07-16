@@ -78,13 +78,6 @@ pub mod pallet {
 
 	#[derive(Encode, Decode, Default, PartialEq, Eq)]
 	#[cfg_attr(feature = "std", derive(Debug))]
-	pub struct DataInfo {
-		url: Vec<u8>,
-		data: Vec<u8>,
-	}
-
-	#[derive(Encode, Decode, Default, PartialEq, Eq)]
-	#[cfg_attr(feature = "std", derive(Debug))]
 	pub struct PriceFeedingData {
 		para_id: ParaId,
 		currencies: Vec<u8>,
@@ -134,11 +127,6 @@ pub mod pallet {
 	// pub type DataId<T: Config> = StorageValue<_, u64>;
 	pub type DataId<T: Config> =	StorageValue<_, u64, ValueQuery, InitialDataId<T>>;
 
-	#[pallet::storage]
-	#[pallet::getter(fn requested_offchain_data)]
-	// Learn more about declaring storage items:
-	// https://substrate.dev/docs/en/knowledgebase/runtime/storage#declaring-storage-items
-	pub type RequestedOffchainData<T: Config> = StorageMap<_, Identity, u64, DataInfo, ValueQuery>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn price_feeding_requests)]
@@ -241,13 +229,12 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn submit_request_data(origin: OriginFor<T>, key: u64, data: Vec<u8>) -> DispatchResult {
+		pub fn submit_request_data(origin: OriginFor<T>,  block_number: T::BlockNumber, key: u64, data: Vec<u8>) -> DispatchResult {
 			// Check that the extrinsic was signed and get the signer.
 			// This function will return an error if the extrinsic is not signed.
 			// https://substrate.dev/docs/en/knowledgebase/runtime/origin
-			let who = ensure_signed(origin.clone())?;
-			Self::save_data_onchain(key, data);
-			Self::deposit_event(Event::FetchedOffchainData(key, who));
+			ensure_signed(origin.clone())?;
+			Self::save_data_response_onchain(block_number, key, data);
 			Ok(())
 		}
 
@@ -309,18 +296,6 @@ pub mod pallet {
 			Ok(().into())
 		}
 
-
-		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1))]
-		pub fn add_fetch_data_request(_origin: OriginFor<T>, url: Vec<u8>) -> DispatchResult {
-			let index = DataId::<T>::get();
-			DataId::<T>::put(index + 1u64);
-			<RequestedOffchainData<T>>::insert(index, DataInfo {
-				url: url,
-				data: Vec::new(),
-			});
-
-			Ok(())
-		}
 	}
 
 	impl<T: Config> Pallet<T> {
@@ -385,15 +360,6 @@ pub mod pallet {
 			}
 		}
 
-		fn save_data_onchain( key: u64,data: Vec<u8>) -> ()  {
-			let info = Self::requested_offchain_data(key);
-			<RequestedOffchainData<T>>::insert(key, DataInfo {
-				url: info.url,
-				data: data,
-			});
-			
-		}
-
 		fn save_data_response_onchain(_block_number:T::BlockNumber, key: u64,response: Vec<u8>) -> ()  {
 			let price_feeding_data = Self::price_feeding_requests(key);
 			<SavedPriceFeedingRequests<T>>::insert(key, PriceFeedingData {
@@ -413,12 +379,14 @@ pub mod pallet {
 			}
 			let block_number = <system::Pallet<T>>::block_number();
 			let mut processed_requests: Vec<u64>  = Vec::new();
-			for (key, val) in <RequestedOffchainData<T> as IterableStorageMap<u64, DataInfo>>::iter() {
-				let url = str::from_utf8(&val.url).unwrap();
-				log::info!("with RequestedOffchainData: {}, {}", key, url);
-				let response = Self::fetch_http_get_result(url).unwrap_or("Failed fetch data".as_bytes().to_vec());
+			for (key, val) in <PriceFeedingRequests<T> as IterableStorageMap<u64, PriceFeedingData>>::iter() {
+				let currencies = str::from_utf8(&val.currencies).unwrap();
+				let split_currencies:Vec<&str> = currencies.split("_").collect();
+				let api_url = str::from_utf8(b"https://min-api.cryptocompare.com/data/price?fsym=").unwrap();
+				let url = api_url.clone().to_owned() + split_currencies[0].clone() + "&tsyms=" + &split_currencies[1].clone();
+				let response = Self::fetch_http_get_result(&url.clone()).unwrap_or("Failed fetch data".as_bytes().to_vec());
 				processed_requests.push(key);
-				let results = signer.send_signed_transaction(|_account| Call::submit_request_data(key, response.clone()));
+				let results = signer.send_signed_transaction(|_account| Call::submit_request_data(block_number, key, response.clone()));
 				for (acc, res) in &results {
 					match res {
 						Ok(()) => log::info!("[{:?}] Submitted data {}", acc.id, key),
