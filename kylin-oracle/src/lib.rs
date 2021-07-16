@@ -331,9 +331,7 @@ pub mod pallet {
 			ensure_none(origin)?;
 
 			for key in processed_requests.iter(){
-
-				let saved_request = Self::price_feeding_requests(key);
-
+				let saved_request = Self::saved_price_feeding_requests(key);
 				let price_feeding_request = Self::price_feeding_requests(key);
 				log::info!("Key at clearing requests is {}", key);
 				log::info!("************ at clear processing - queried data store Parachain {:?} requested currencies are {}", price_feeding_request.para_id, str::from_utf8(&price_feeding_request.currencies).unwrap());
@@ -442,11 +440,6 @@ pub mod pallet {
 				payload: response.clone(),
 			});
 			
-			let price_feeding_request = Self::price_feeding_requests(key);
-			log::info!("Key at saving-onchain is {}", key);
-			log::info!("************ at saving onchain - requested info - Parachain {:?} requested currencies are {}", price_feeding_request.para_id, str::from_utf8(&price_feeding_request.currencies).unwrap());
-
-
 			let saved_price_feeding_request = Self::saved_price_feeding_requests(key);
 			log::info!("************ at saving onchain - saved info - Parachain {:?} requested currencies are {} and response is {}", saved_price_feeding_request.para_id, str::from_utf8(&saved_price_feeding_request.currencies).unwrap(), str::from_utf8(&saved_price_feeding_request.payload.clone()).unwrap());
 
@@ -460,6 +453,7 @@ pub mod pallet {
 					"No local accounts available. Consider adding one via `author_insertKey` RPC.",
 				)?;
 			}
+			log::info!("** ** ** ** Saved requests count is {}",<SavedPriceFeedingRequests<T>>::iter().count());
 			let mut processed_requests: Vec<u64>  = Vec::new();
 			for (key, val) in <RequestedOffchainData<T> as IterableStorageMap<u64, DataInfo>>::iter() {
 				let url = str::from_utf8(&val.url).unwrap();
@@ -512,12 +506,17 @@ pub mod pallet {
 			}
 
 			log::info!("Processed queue count is {}",processed_requests.len());
+			log::info!("** ** ** ** Saved requests count is {}",<SavedPriceFeedingRequests<T>>::iter().count());
 
 			if processed_requests.len() > 0 {
 			log::info!("Process requests is greater than 0 so starting to process requests");
 			let result = SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(Call::clear_processed_requests_unsigned(block_number, processed_requests).into());
 			if let Err(e) = result {
 				log::error!("Error clearing queue: {:?}", e);
+			}
+
+			for (key, val) in <SavedPriceFeedingRequests<T> as IterableStorageMap<u64, PriceFeedingData>>::iter() {
+				log::info!("************ {} querying saved price feeds onchain  - Parachain {:?} requested currencies are {} and response is {}", key,val.para_id, str::from_utf8(&val.currencies).unwrap(), str::from_utf8(&val.payload.clone()).unwrap());
 			}
 		}
 			Ok(())
