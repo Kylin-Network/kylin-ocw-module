@@ -65,14 +65,13 @@ pub mod pallet {
 	use frame_system::{
 		self as system,
 		offchain::{
-			AppCrypto, CreateSignedTransaction, SendSignedTransaction, Signer,SignedPayload,SigningTypes,SubmitTransaction
+			AppCrypto, CreateSignedTransaction, SendSignedTransaction, Signer,SubmitTransaction
 		}
 	};
 	use sp_runtime::{
 		traits::Zero,
 		offchain::{http, Duration, storage::{MutateStorageError, StorageRetrievalError, StorageValueRef}},
 	};
-	
 	use cumulus_primitives_core::ParaId;
 	use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para};
 	use xcm::v0::{Error as XcmError, SendXcm};
@@ -122,25 +121,6 @@ pub mod pallet {
 		/// multiple pallets send unsigned transactions.
 		#[pallet::constant]
 		type UnsignedPriority: Get<TransactionPriority>;
-
-
-	}
-
-	/// Payload used by this example crate to hold price
-	/// data required to submit a transaction.
-	#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug)]
-	pub struct PricePayload<Public, BlockNumber> {
-		block_number: BlockNumber,
-		para_id: ParaId,
-		currencies: Vec<u8>,
-		response: Vec<u8>,
-		public: Public,
-	}
-
-	impl<T: SigningTypes> SignedPayload<T> for PricePayload<T::Public, T::BlockNumber> {
-		fn public(&self) -> T::Public {
-			self.public.clone()
-		}
 	}
 
 	#[pallet::pallet]
@@ -272,10 +252,9 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn submit_price_request_unsigned(origin: OriginFor<T>,_block_number: T::BlockNumber, key: u64,data: Vec<u8>) -> DispatchResult {
-			log::info!("Submit was called with key {} and data {} ", key, str::from_utf8(&data).unwrap());
+		pub fn submit_price_request_unsigned(origin: OriginFor<T>,block_number: T::BlockNumber, key: u64,data: Vec<u8>) -> DispatchResult {
 			ensure_none(origin.clone())?;
-			Self::save_data_response_onchain(key, data);
+			Self::save_data_response_onchain(block_number, key, data);
 			Ok(())
 		}
 
@@ -283,8 +262,6 @@ pub mod pallet {
 		#[pallet::weight(0)]
 		pub fn request_price_feed(_origin: OriginFor<T>,  requester_para_id:ParaId, requested_currencies: Vec<u8>) -> DispatchResult
 		{
-			log::info!("******************* price feeds *******************");
-			log::info!("Requested currencies are {}", str::from_utf8(&requested_currencies).unwrap());
 			let index = DataId::<T>::get();
 			DataId::<T>::put(index + 1u64);
 			<PriceFeedingRequests<T>>::insert(index, PriceFeedingData {
@@ -301,9 +278,7 @@ pub mod pallet {
 		#[pallet::weight(0)]
 		pub fn request_price_feed_via_xcm(origin: OriginFor<T>,  requested_currencies: Vec<u8>) -> DispatchResult
 		{
-			log::info!("******************* price feeds via xcm *******************");
 			let requester_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
-			log::info!("Parachain {:?} requested currencies are {}", requester_para_id, str::from_utf8(&requested_currencies).unwrap());
 			let index = DataId::<T>::get();
 			DataId::<T>::put(index + 1u64);
 			<PriceFeedingRequests<T>>::insert(index, PriceFeedingData {
@@ -311,13 +286,7 @@ pub mod pallet {
 				currencies: requested_currencies.clone(),
 				payload: Vec::new(),
 			});
-
-			let price_feeding_request = Self::price_feeding_requests(index);
-			log::info!("Key at request is {}", index);
-			log::info!("************ at request_via_xcm - queried data store Parachain {:?} requested currencies are {}", price_feeding_request.para_id, str::from_utf8(&price_feeding_request.currencies).unwrap());
-
 			Self::deposit_event(Event::RequestPriceFeed(requester_para_id, requested_currencies.clone()));
-
 			Ok(())
 		}
 
@@ -332,16 +301,9 @@ pub mod pallet {
 
 			for key in processed_requests.iter(){
 				let saved_request = Self::saved_price_feeding_requests(key);
-				let price_feeding_request = Self::price_feeding_requests(key);
-				log::info!("Key at clearing requests is {}", key);
-				log::info!("************ at clear processing - queried data store Parachain {:?} requested currencies are {}", price_feeding_request.para_id, str::from_utf8(&price_feeding_request.currencies).unwrap());
-	
-				log::info!("Processed price feeding request {} for parachain {:?}, currencies requested ......{:?}. Returned data {:?}", &key,&saved_request.para_id,&saved_request.currencies, &saved_request.payload );
 				Self::deposit_event(Event::ProcessedPriceFeedRequest(saved_request.para_id, saved_request.currencies.clone(), saved_request.payload.clone()));
 				let current_block = <system::Pallet<T>>::block_number();
 				<PriceFeedingRequests<T>>::remove(&key);
-				log::info!("Removed request for key {}. ", key);
-				log::info!("Price feeding requests count {}",<PriceFeedingRequests<T>>::iter().count() );
 				<NextUnsignedAt<T>>::put(current_block);
 			}
 			Ok(().into())
@@ -432,17 +394,13 @@ pub mod pallet {
 			
 		}
 
-		fn save_data_response_onchain( key: u64,response: Vec<u8>) -> ()  {
+		fn save_data_response_onchain(_block_number:T::BlockNumber, key: u64,response: Vec<u8>) -> ()  {
 			let price_feeding_data = Self::price_feeding_requests(key);
 			<SavedPriceFeedingRequests<T>>::insert(key, PriceFeedingData {
 				para_id: price_feeding_data.para_id,
 				currencies: price_feeding_data.currencies.clone(),
 				payload: response.clone(),
 			});
-			
-			let saved_price_feeding_request = Self::saved_price_feeding_requests(key);
-			log::info!("************ at saving onchain - saved info - Parachain {:?} requested currencies are {} and response is {}", saved_price_feeding_request.para_id, str::from_utf8(&saved_price_feeding_request.currencies).unwrap(), str::from_utf8(&saved_price_feeding_request.payload.clone()).unwrap());
-
 		}
 
 		/// A helper function to fetch the price and send signed transaction.
@@ -453,7 +411,7 @@ pub mod pallet {
 					"No local accounts available. Consider adding one via `author_insertKey` RPC.",
 				)?;
 			}
-			log::info!("** ** ** ** Saved requests count is {}",<SavedPriceFeedingRequests<T>>::iter().count());
+			let block_number = <system::Pallet<T>>::block_number();
 			let mut processed_requests: Vec<u64>  = Vec::new();
 			for (key, val) in <RequestedOffchainData<T> as IterableStorageMap<u64, DataInfo>>::iter() {
 				let url = str::from_utf8(&val.url).unwrap();
@@ -468,6 +426,13 @@ pub mod pallet {
 					}
 				}
 			}
+			let results = signer.send_signed_transaction(|_account| Call::clear_processed_requests_unsigned(block_number, processed_requests.clone()));
+			for (acc, res) in &results {
+				match res {
+					Ok(()) => log::info!("[{:?}] Clearing out processed requests.", acc.id),
+					Err(e) => log::error!("[{:?}] Failed to clear out processed requests: {:?}", acc.id, e),
+				}
+			}
 
 			Ok(())
 		}
@@ -479,46 +444,23 @@ pub mod pallet {
 			}
 			
 			let mut processed_requests: Vec<u64>  = Vec::new();
-			let test = <PriceFeedingRequests<T> as IterableStorageMap<u64, PriceFeedingData>>::iter();
-			log::info!("amount of keys in price feeding is {}", test.count());
 			
 			for (key, val) in <PriceFeedingRequests<T> as IterableStorageMap<u64, PriceFeedingData>>::iter() {
-				let parachain_id =&val.para_id;
 				let currencies = str::from_utf8(&val.currencies).unwrap();
 				let split_currencies:Vec<&str> = currencies.split("_").collect();
 				let api_url = str::from_utf8(b"https://min-api.cryptocompare.com/data/price?fsym=").unwrap();
 				let url = api_url.clone().to_owned() + split_currencies[0].clone() + "&tsyms=" + &split_currencies[1].clone();
-
-				log::info!("Running price feeding request  {}  for parachain {:?}, currencies requested.... {}", key,parachain_id,currencies );
 				let response = Self::fetch_http_get_result(&url.clone()).unwrap_or("Failed fetch data".as_bytes().to_vec());
-				let key_exists = <PriceFeedingRequests<T>>::contains_key(key);
-				log::info!("Key exists in price feeding queue {}", key_exists);
-				if <PriceFeedingRequests<T>>::contains_key(key) {
-					log::info!("processed requests {}", key);
-					processed_requests.push(key);
-				
-				log::info!("Call to save data onchain.........");
+				processed_requests.push(key);
 				let result = SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(Call::submit_price_request_unsigned(block_number,key, response).into());
 				if let Err(e) = result {
 					log::error!("Error submitting unsigned transaction: {:?}", e);
 				}
 			}
-			}
-
-			log::info!("Processed queue count is {}",processed_requests.len());
-			log::info!("** ** ** ** Saved requests count is {}",<SavedPriceFeedingRequests<T>>::iter().count());
-
-			if processed_requests.len() > 0 {
-			log::info!("Process requests is greater than 0 so starting to process requests");
 			let result = SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(Call::clear_processed_requests_unsigned(block_number, processed_requests).into());
 			if let Err(e) = result {
 				log::error!("Error clearing queue: {:?}", e);
 			}
-
-			for (key, val) in <SavedPriceFeedingRequests<T> as IterableStorageMap<u64, PriceFeedingData>>::iter() {
-				log::info!("************ {} querying saved price feeds onchain  - Parachain {:?} requested currencies are {} and response is {}", key,val.para_id, str::from_utf8(&val.currencies).unwrap(), str::from_utf8(&val.payload.clone()).unwrap());
-			}
-		}
 			Ok(())
 		}
 
@@ -573,58 +515,6 @@ pub mod pallet {
 			Ok(body_str.as_bytes().to_vec())
 		}
 	
-		
-	// fn validate_transaction_parameters(
-	// 	block_number: &T::BlockNumber,
-	// 	data: Vec<u8>,
-	// ) -> TransactionValidity {
-	// 	// Now let's check if the transaction has any chance to succeed.
-	// 	let next_unsigned_at = <NextUnsignedAt<T>>::get();
-	// 	if &next_unsigned_at > block_number {
-	// 		return InvalidTransaction::Stale.into();
-	// 	}
-	// 	// Let's make sure to reject transactions from the future.
-	// 	let current_block = <system::Pallet<T>>::block_number();
-	// 	if &current_block < block_number {
-	// 		return InvalidTransaction::Future.into();
-	// 	}
-
-	// 	// We prioritize transactions that are more far away from current average.
-	// 	//
-	// 	// Note this doesn't make much sense when building an actual oracle, but this example
-	// 	// is here mostly to show off offchain workers capabilities, not about building an
-	// 	// oracle.
-
-
-	// 	ValidTransaction::with_tag_prefix("Kylin OCW")
-	// 		// We set base priority to 2**20 and hope it's included before any other
-	// 		// transactions in the pool. Next we tweak the priority depending on how much
-	// 		// it differs from the current average. (the more it differs the more priority it
-	// 		// has).
-	// 		.priority(T::UnsignedPriority::get().saturating_add(data as _))
-	// 		// This transaction does not require anything else to go before into the pool.
-	// 		// In theory we could require `previous_unsigned_at` transaction to go first,
-	// 		// but it's not necessary in our case.
-	// 		//.and_requires()
-	// 		// We set the `provides` tag to be the same as `next_unsigned_at`. This makes
-	// 		// sure only one transaction produced after `next_unsigned_at` will ever
-	// 		// get to the transaction pool and will end up in the block.
-	// 		// We can still have multiple transactions compete for the same "spot",
-	// 		// and the one with higher priority will replace other one in the pool.
-	// 		.and_provides(next_unsigned_at)
-	// 		// The transaction is only valid for next 5 blocks. After that it's
-	// 		// going to be revalidated by the pool.
-	// 		.longevity(5)
-	// 		// It's fine to propagate that transaction to other peers, which means it can be
-	// 		// created even by nodes that don't produce blocks.
-	// 		// Note that sometimes it's better to keep it for yourself (if you are the block
-	// 		// producer), since for instance in some schemes others may copy your solution and
-	// 		// claim a reward.
-	// 		.propagate(true)
-	// 		.build()
-	// }
-	
-
 
 	fn validate_transaction(block_number: &T::BlockNumber) -> TransactionValidity {
 
@@ -638,8 +528,6 @@ pub mod pallet {
 		if &current_block < block_number {
 			return InvalidTransaction::Future.into();
 		}
-
-
 		ValidTransaction::with_tag_prefix("Kylin OCW")
 			.priority(T::UnsignedPriority::get())
 			.longevity(5)
