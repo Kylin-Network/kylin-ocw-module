@@ -72,17 +72,10 @@ pub mod pallet {
 		traits::Zero,
 		offchain::{http, Duration, storage::{MutateStorageError, StorageRetrievalError, StorageValueRef}},
 	};
+	
 	use cumulus_primitives_core::ParaId;
 	use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para};
 	use xcm::v0::{Error as XcmError, SendXcm};
-
-	#[derive(Encode, Decode, Default, PartialEq, Eq)]
-	#[cfg_attr(feature = "std", derive(Debug))]
-	pub struct PriceFeedingData {
-		para_id: ParaId,
-		currencies: Vec<u8>,
-		payload: Vec<u8>,
-	}
 
 	enum TransactionType {
 		Signed,
@@ -90,6 +83,15 @@ pub mod pallet {
 		UnsignedForAll,
 		Raw,
 		None,
+	}
+
+	#[derive(Encode, Decode, Default, PartialEq, Eq)]
+	#[cfg_attr(feature = "std", derive(Debug))]
+	pub struct PriceFeedingData<BlockNumber> {
+		para_id: ParaId,
+		currencies: Vec<u8>,
+		start_time: BlockNumber,
+		payload: Vec<u8>,
 	}
 
 	#[pallet::config]
@@ -130,12 +132,12 @@ pub mod pallet {
 
 	#[pallet::storage]
 	#[pallet::getter(fn price_feeding_requests)]
-	pub type PriceFeedingRequests<T: Config> = StorageMap<_, Identity, u64, PriceFeedingData, ValueQuery>;
+	pub type PriceFeedingRequests<T: Config> = StorageMap<_, Identity, u64, PriceFeedingData< T::BlockNumber>, ValueQuery>;
 
 
 	#[pallet::storage]
 	#[pallet::getter(fn saved_price_feeding_requests)]
-	pub type SavedPriceFeedingRequests<T: Config> = StorageMap<_, Identity, u64, PriceFeedingData, ValueQuery>;
+	pub type SavedPriceFeedingRequests<T: Config> = StorageMap<_, Identity, u64, PriceFeedingData< T::BlockNumber>, ValueQuery>;
 
 
 	#[pallet::storage]
@@ -250,10 +252,13 @@ pub mod pallet {
 		pub fn request_price_feed(_origin: OriginFor<T>,  requester_para_id:ParaId, requested_currencies: Vec<u8>) -> DispatchResult
 		{
 			let index = DataId::<T>::get();
+			let block_number = <system::Pallet<T>>::block_number();
+
 			DataId::<T>::put(index + 1u64);
 			<PriceFeedingRequests<T>>::insert(index, PriceFeedingData {
 				para_id: requester_para_id,
 				currencies: requested_currencies.clone(),
+				start_time:block_number,
 				payload: Vec::new(),
 			});
 			
@@ -266,11 +271,14 @@ pub mod pallet {
 		pub fn request_price_feed_via_xcm(origin: OriginFor<T>,  requested_currencies: Vec<u8>) -> DispatchResult
 		{
 			let requester_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
+			let block_number = <system::Pallet<T>>::block_number();
+
 			let index = DataId::<T>::get();
 			DataId::<T>::put(index + 1u64);
 			<PriceFeedingRequests<T>>::insert(index, PriceFeedingData {
 				para_id: requester_para_id,
 				currencies: requested_currencies.clone(),
+				start_time:block_number,
 				payload: Vec::new(),
 			});
 			Self::deposit_event(Event::RequestPriceFeed(requester_para_id, requested_currencies.clone()));
@@ -361,10 +369,12 @@ pub mod pallet {
 		}
 
 		fn save_data_response_onchain(_block_number:T::BlockNumber, key: u64,response: Vec<u8>) -> ()  {
+			
 			let price_feeding_data = Self::price_feeding_requests(key);
 			<SavedPriceFeedingRequests<T>>::insert(key, PriceFeedingData {
 				para_id: price_feeding_data.para_id,
 				currencies: price_feeding_data.currencies.clone(),
+				start_time:_block_number,
 				payload: response.clone(),
 			});
 		}
@@ -379,7 +389,7 @@ pub mod pallet {
 			}
 			let block_number = <system::Pallet<T>>::block_number();
 			let mut processed_requests: Vec<u64>  = Vec::new();
-			for (key, val) in <PriceFeedingRequests<T> as IterableStorageMap<u64, PriceFeedingData>>::iter() {
+			for (key, val) in <PriceFeedingRequests<T> as IterableStorageMap<_, _>>::iter() {
 				let currencies = str::from_utf8(&val.currencies).unwrap();
 				let split_currencies:Vec<&str> = currencies.split("_").collect();
 				let api_url = str::from_utf8(b"https://min-api.cryptocompare.com/data/price?fsym=").unwrap();
@@ -413,7 +423,9 @@ pub mod pallet {
 			
 			let mut processed_requests: Vec<u64>  = Vec::new();
 			
-			for (key, val) in <PriceFeedingRequests<T> as IterableStorageMap<u64, PriceFeedingData>>::iter() {
+
+			// for (key, val) in <PriceFeedingRequests<T> as <PriceFeedingRequests<T> as IterableStorageMapExtended<_, _>>::iter() {
+			for (key, val) in <PriceFeedingRequests<T> as IterableStorageMap<_, _>>::iter() {
 				let currencies = str::from_utf8(&val.currencies).unwrap();
 				let split_currencies:Vec<&str> = currencies.split("_").collect();
 				let api_url = str::from_utf8(b"https://min-api.cryptocompare.com/data/price?fsym=").unwrap();
