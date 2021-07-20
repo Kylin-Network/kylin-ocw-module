@@ -54,7 +54,7 @@ mod benchmarking;
 
 #[frame_support::pallet]
 pub mod pallet {
-	use frame_support::{log, dispatch::DispatchResultWithPostInfo, pallet_prelude::*};
+	use frame_support::{log, dispatch::DispatchResultWithPostInfo, pallet_prelude::*, traits::UnixTime};
 	use frame_system::pallet_prelude::*;
 	use frame_system::Config as SystemConfig;
 	use codec::{Decode, Encode};
@@ -90,7 +90,10 @@ pub mod pallet {
 	pub struct PriceFeedingData<BlockNumber> {
 		para_id: ParaId,
 		currencies: Vec<u8>,
-		start_time: BlockNumber,
+		requested_block_number: BlockNumber,
+		processed_block_number: Option<BlockNumber>,
+		requested_timestamp:u128,
+		processed_timestamp:Option<u128>,
 		payload: Vec<u8>,
 	}
 
@@ -109,6 +112,8 @@ pub mod pallet {
 		type Call: From<Call<Self>> + Encode;
 
 		type XcmSender: SendXcm;
+
+		type UnixTime: UnixTime;
 
 		/// A configuration for base priority of unsigned transactions.
 		///
@@ -252,13 +257,17 @@ pub mod pallet {
 		pub fn request_price_feed(_origin: OriginFor<T>,  requester_para_id:ParaId, requested_currencies: Vec<u8>) -> DispatchResult
 		{
 			let index = DataId::<T>::get();
-			let block_number = <system::Pallet<T>>::block_number();
+			let current_block_number = <system::Pallet<T>>::block_number();
+			let current_timestamp = T::UnixTime::now().as_millis();
 
 			DataId::<T>::put(index + 1u64);
 			<PriceFeedingRequests<T>>::insert(index, PriceFeedingData {
 				para_id: requester_para_id,
 				currencies: requested_currencies.clone(),
-				start_time:block_number,
+				requested_block_number:current_block_number,
+				processed_block_number:None,
+				requested_timestamp:current_timestamp,
+				processed_timestamp: None,
 				payload: Vec::new(),
 			});
 			
@@ -271,16 +280,24 @@ pub mod pallet {
 		pub fn request_price_feed_via_xcm(origin: OriginFor<T>,  requested_currencies: Vec<u8>) -> DispatchResult
 		{
 			let requester_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
-			let block_number = <system::Pallet<T>>::block_number();
+			let current_block_number = <system::Pallet<T>>::block_number();
+			let current_timestamp = T::UnixTime::now().as_millis();
 
 			let index = DataId::<T>::get();
 			DataId::<T>::put(index + 1u64);
+
 			<PriceFeedingRequests<T>>::insert(index, PriceFeedingData {
 				para_id: requester_para_id,
 				currencies: requested_currencies.clone(),
-				start_time:block_number,
+				requested_block_number:current_block_number,
+				processed_block_number:None,
+				requested_timestamp:current_timestamp,
+				processed_timestamp: None,
 				payload: Vec::new(),
 			});
+			
+
+
 			Self::deposit_event(Event::RequestPriceFeed(requester_para_id, requested_currencies.clone()));
 			Ok(())
 		}
@@ -368,19 +385,26 @@ pub mod pallet {
 			}
 		}
 
-		fn save_data_response_onchain(_block_number:T::BlockNumber, key: u64,response: Vec<u8>) -> ()  {
+		fn save_data_response_onchain(block_number:T::BlockNumber, key: u64,response: Vec<u8>) -> ()  {
 			
 			let price_feeding_data = Self::price_feeding_requests(key);
+			let current_timestamp = T::UnixTime::now().as_millis();
+
 			<SavedPriceFeedingRequests<T>>::insert(key, PriceFeedingData {
 				para_id: price_feeding_data.para_id,
 				currencies: price_feeding_data.currencies.clone(),
-				start_time:_block_number,
-				payload: response.clone(),
+				requested_block_number:price_feeding_data.requested_block_number,
+				processed_block_number:Some(block_number),
+				requested_timestamp:price_feeding_data.requested_timestamp,
+				processed_timestamp: Some(current_timestamp),
+				payload: response
+
 			});
 		}
 
 		/// A helper function to fetch the price and send signed transaction.
 		fn fetch_data_and_send_signed() -> Result<(), &'static str> {
+			
 			let signer = Signer::<T, T::AuthorityId>::all_accounts();
 			if !signer.can_sign() {
 				return Err(
