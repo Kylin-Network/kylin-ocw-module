@@ -75,7 +75,7 @@ pub mod pallet {
 	
 	use cumulus_primitives_core::ParaId;
 	use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para};
-	use xcm::v0::{Error as XcmError, SendXcm};
+	use xcm::v0::{Xcm, Error as XcmError,OriginKind,Junction, MultiLocation, SendXcm};
 
 	enum TransactionType {
 		Signed,
@@ -161,6 +161,10 @@ pub mod pallet {
 		RequestedOffchainDataViaXCM(ParaId, Vec<u8>),
 		RequestPriceFeed(ParaId, Vec<u8>),
 		ProcessedPriceFeedRequest(ParaId, Vec<u8>, Vec<u8>,),
+
+		ResponseSent(ParaId,T::BlockNumber,Vec<u8>),
+		ErrorSendingResponse(XcmError,ParaId,T::BlockNumber,Vec<u8>),
+		ResponseReceived(ParaId,T::BlockNumber,Vec<u8>),
 
 		ErrorRequestingData(XcmError, ParaId, Vec<u8>),
 		ErrorFetchingData(XcmError, ParaId, Vec<u8>),
@@ -249,7 +253,7 @@ pub mod pallet {
 		pub fn submit_price_request_unsigned(origin: OriginFor<T>,block_number: T::BlockNumber, key: u64,data: Vec<u8>) -> DispatchResult {
 			ensure_none(origin.clone())?;
 			Self::save_data_response_onchain(block_number, key, data);
-			Ok(())
+			Self::send_response_to_parachain(block_number, key)
 		}
 
 
@@ -296,9 +300,16 @@ pub mod pallet {
 				payload: Vec::new(),
 			});
 			
-
-
 			Self::deposit_event(Event::RequestPriceFeed(requester_para_id, requested_currencies.clone()));
+			Ok(())
+		}
+
+		#[pallet::weight(0)]
+		pub fn receive_response_from_parachain(origin: OriginFor<T>, response:Vec<u8>) -> DispatchResult {
+			let para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
+			let block_number = <system::Pallet<T>>::block_number();
+			log::info!("Response received from Parachain {:?}. Received....{}", para_id,str::from_utf8(&response).unwrap());
+			Self::deposit_event(Event::ResponseReceived(para_id,block_number,response.clone()));
 			Ok(())
 		}
 
@@ -401,6 +412,25 @@ pub mod pallet {
 
 			});
 		}
+
+		fn send_response_to_parachain(block_number: T::BlockNumber, key:u64) -> DispatchResult {
+			let saved_request = Self::saved_price_feeding_requests(key);
+			match T::XcmSender::send_xcm(
+				MultiLocation::X2(Junction::Parent, Junction::Parachain(saved_request.para_id.into())),
+				Xcm::Transact {
+					origin_type: OriginKind::Native,
+					require_weight_at_most: 1_000,
+					call: <T as Config>::Call::from(Call::<T>::receive_response_from_parachain(saved_request.payload.clone())).encode().into(),
+				},
+			) {
+				Ok(()) => Self::deposit_event(Event::ResponseSent(saved_request.para_id, block_number, saved_request.payload.clone())),
+				Err(e) => Self::deposit_event(Event::ErrorSendingResponse(e, saved_request.para_id, block_number, saved_request.payload.clone())),
+			}
+			Ok(())
+
+		}
+
+
 
 		/// A helper function to fetch the price and send signed transaction.
 		fn fetch_data_and_send_signed() -> Result<(), &'static str> {
