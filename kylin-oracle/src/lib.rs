@@ -69,10 +69,11 @@ pub mod pallet {
 		}
 	};
 	use sp_runtime::{
+		RuntimeDebug,
+		offchain::{http, Duration, storage::StorageValueRef},
 		traits::Zero,
-		offchain::{http, Duration, storage::{MutateStorageError, StorageRetrievalError, StorageValueRef}},
+		transaction_validity::{InvalidTransaction, ValidTransaction, TransactionValidity},
 	};
-	
 	use cumulus_primitives_core::ParaId;
 	use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para};
 	use xcm::v0::{Xcm, Error as XcmError,OriginKind,Junction, MultiLocation, SendXcm};
@@ -335,6 +336,7 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
+
 		fn choose_transaction_type(block_number: T::BlockNumber) -> TransactionType {
 			/// A friendlier name for the error that is going to be returned in case we are in the grace
 			/// period.
@@ -344,17 +346,22 @@ pub mod pallet {
 			// Since the local storage is common for all offchain workers, it's a good practice
 			// to prepend your entry with the module name.
 			let val = StorageValueRef::persistent(b"kylin_oracle::last_send");
+
 			// The Local Storage is persisted and shared between runs of the offchain workers,
 			// and offchain workers may run concurrently. We can use the `mutate` function, to
 			// write a storage entry in an atomic fashion. Under the hood it uses `compare_and_set`
 			// low-level method of local storage API, which means that only one worker
 			// will be able to "acquire a lock" and send a transaction if multiple workers
 			// happen to be executed concurrently.
-			let res = val.mutate(|last_send: Result<Option<T::BlockNumber>, StorageRetrievalError>| {
+			let res = val.mutate(|last_send: Option<Option<T::BlockNumber>>| {
+				// We match on the value decoded from the storage. The first `Option`
+				// indicates if the value was present in the storage at all,
+				// the second (inner) `Option` indicates if the value was succesfuly
+				// decoded to expected type (`T::BlockNumber` in our case).
 				match last_send {
 					// If we already have a value in storage and the block number is recent enough
 					// we avoid sending another transaction at this time.
-					Ok(Some(block)) if block_number < block => {
+					Some(Some(block)) if block_number < block  => {
 						Err(RECENTLY_SENT)
 					},
 					// In every other case we attempt to acquire the lock and send a transaction.
@@ -370,7 +377,7 @@ pub mod pallet {
 			// written to in the meantime.
 			match res {
 				// The value has been set correctly, which means we can safely send a transaction now.
-				Ok(block_number) => {
+				Ok(Ok(block_number)) => {
 					// Depending if the block is even or odd we will send a `Signed` or `Unsigned`
 					// transaction.
 					// Note that this logic doesn't really guarantee that the transactions will be sent
@@ -386,13 +393,13 @@ pub mod pallet {
 					else { TransactionType::Raw }
 				},
 				// We are in the grace period, we should not send a transaction this time.
-				Err(MutateStorageError::ValueFunctionFailed(RECENTLY_SENT)) => TransactionType::None,
+				Err(RECENTLY_SENT) => TransactionType::None,
 				// We wanted to send a transaction, but failed to write the block number (acquire a
 				// lock). This indicates that another offchain worker that was running concurrently
 				// most likely executed the same logic and succeeded at writing to storage.
 				// Thus we don't really want to send the transaction, knowing that the other run
 				// already did.
-				Err(MutateStorageError::ConcurrentModification(_)) => TransactionType::None,
+				Ok(Err(_)) => TransactionType::None,
 			}
 		}
 
