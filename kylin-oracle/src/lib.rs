@@ -321,7 +321,7 @@ pub mod pallet {
 		) -> DispatchResultWithPostInfo {
 			// This ensures that the function can only be called via unsigned transaction.
 			ensure_none(origin)?;
-
+			log::info!("********** starting to clear requests...... ************");
 			for key in processed_requests.iter(){
 				let saved_request = Self::saved_price_feeding_requests(key);
 				Self::deposit_event(Event::ProcessedPriceFeedRequest(saved_request.para_id, saved_request.currencies.clone(), saved_request.payload.clone()));
@@ -329,6 +329,7 @@ pub mod pallet {
 				<PriceFeedingRequests<T>>::remove(&key);
 				<NextUnsignedAt<T>>::put(current_block);
 			}
+			log::info!("*********** Completed clearing requests...... ************");
 			Ok(().into())
 		}
 
@@ -458,14 +459,16 @@ pub mod pallet {
 					}
 				}
 			}
-			let results = signer.send_signed_transaction(|_account| Call::clear_processed_requests_unsigned(block_number, processed_requests.clone()));
-			for (acc, res) in &results {
-				match res {
-					Ok(()) => log::info!("[{:?}] Clearing out processed requests.", acc.id),
-					Err(e) => log::error!("[{:?}] Failed to clear out processed requests: {:?}", acc.id, e),
+
+			if (processed_requests.iter().count() > 0) {
+				let results = signer.send_signed_transaction(|_account| Call::clear_processed_requests_unsigned(block_number, processed_requests.clone()));
+				for (acc, res) in &results {
+					match res {
+						Ok(()) => log::info!("[{:?}] Clearing out processed requests.", acc.id),
+						Err(e) => log::error!("[{:?}] Failed to clear out processed requests: {:?}", acc.id, e),
+					}
 				}
 			}
-
 			Ok(())
 		}
 
@@ -477,8 +480,6 @@ pub mod pallet {
 			
 			let mut processed_requests: Vec<u64>  = Vec::new();
 			
-
-			// for (key, val) in <PriceFeedingRequests<T> as <PriceFeedingRequests<T> as IterableStorageMapExtended<_, _>>::iter() {
 			for (key, val) in <PriceFeedingRequests<T> as IterableStorageMap<_, _>>::iter() {
 				let currencies = str::from_utf8(&val.currencies).unwrap();
 				let split_currencies:Vec<&str> = currencies.split("_").collect();
@@ -491,10 +492,13 @@ pub mod pallet {
 					log::error!("Error submitting unsigned transaction: {:?}", e);
 				}
 			}
-			let result = SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(Call::clear_processed_requests_unsigned(block_number, processed_requests).into());
-			if let Err(e) = result {
-				log::error!("Error clearing queue: {:?}", e);
+			if (processed_requests.iter().count() > 0) {
+				let result = SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(Call::clear_processed_requests_unsigned(block_number, processed_requests).into());
+				if let Err(e) = result {
+					log::error!("Error clearing queue: {:?}", e);
+				}
 			}
+			
 			Ok(())
 		}
 
