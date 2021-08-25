@@ -5,7 +5,7 @@ description = "oracle for fetch data from datasource"
 version = '3.0.0'
 license = 'Apache 2.0'
 homepage = 'https://substrate.dev'
-repository = "https://github.com/kylin-network/kylin-node"
+repository = "https://github.com/kylin-network/kylin-collator"
 edition = '2018'
 
 [package.metadata.docs.rs]
