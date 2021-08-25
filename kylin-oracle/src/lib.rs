@@ -75,8 +75,9 @@ pub mod pallet {
 	
 	use cumulus_primitives_core::ParaId;
 	use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para};
-	use xcm::v0::{Xcm, Error as XcmError,OriginKind,Junction, MultiLocation, SendXcm};
 
+	use xcm::latest::prelude::*;
+	use xcm::latest::{Xcm, Error as XcmError, SendXcm, OriginKind, Junction};
 	enum TransactionType {
 		Signed,
 		UnsignedForAny,
@@ -417,7 +418,7 @@ pub mod pallet {
 		fn send_response_to_parachain(block_number: T::BlockNumber, key:u64) -> DispatchResult {
 			let saved_request = Self::saved_price_feeding_requests(key);
 			match T::XcmSender::send_xcm(
-				MultiLocation::X2(Junction::Parent, Junction::Parachain(saved_request.para_id.into())),
+				(1, Junction::Parachain(saved_request.para_id.into())).into(),
 				Xcm::Transact {
 					origin_type: OriginKind::Native,
 					require_weight_at_most: 1_000,
