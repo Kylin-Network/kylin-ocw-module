@@ -59,6 +59,7 @@ pub mod pallet {
 	use frame_system::Config as SystemConfig;
 	use codec::{Decode, Encode};
 	use sp_std::str;
+	use sp_std::vec;
 	use sp_std::vec::Vec;
 	use sp_std::borrow::ToOwned;
 	use frame_support::storage::IterableStorageMap;
@@ -75,7 +76,7 @@ pub mod pallet {
 	
 	use cumulus_primitives_core::ParaId;
 	use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para};
-	use xcm::latest::{Xcm, Error as XcmError, SendXcm, OriginKind, Junction};
+	use xcm::latest::{prelude::*, Xcm, SendXcm, OriginKind, Junction};
 	enum TransactionType {
 		Signed,
 		UnsignedForAny,
@@ -165,11 +166,11 @@ pub mod pallet {
 		ProcessedPriceFeedRequest(ParaId, Vec<u8>, Vec<u8>,),
 
 		ResponseSent(ParaId,T::BlockNumber,Vec<u8>),
-		ErrorSendingResponse(XcmError,ParaId,T::BlockNumber,Vec<u8>),
+		ErrorSendingResponse(SendError,ParaId,T::BlockNumber,Vec<u8>),
 		ResponseReceived(ParaId,T::BlockNumber,Vec<u8>),
 
-		ErrorRequestingData(XcmError, ParaId, Vec<u8>),
-		ErrorFetchingData(XcmError, ParaId, Vec<u8>),
+		ErrorRequestingData(SendError, ParaId, Vec<u8>),
+		ErrorFetchingData(SendError, ParaId, Vec<u8>),
 	}
 
 	#[pallet::validate_unsigned]
@@ -458,12 +459,12 @@ pub mod pallet {
 			let saved_request = Self::saved_price_feeding_requests(key);
 			match T::XcmSender::send_xcm(
 				(1, Junction::Parachain(saved_request.para_id.into())).into(),
-				Xcm::Transact {
+				Xcm(vec![Transact {
 					origin_type: OriginKind::Native,
 					require_weight_at_most: 1_000,
 					call: <T as Config>::Call::from(Call::<T>::receive_response_from_parachain(saved_request.payload.clone())).encode().into(),
 				},
-			) {
+				])) {
 				Ok(()) => Self::deposit_event(Event::ResponseSent(saved_request.para_id, block_number, saved_request.payload.clone())),
 				Err(e) => Self::deposit_event(Event::ErrorSendingResponse(e, saved_request.para_id, block_number, saved_request.payload.clone())),
 			}
