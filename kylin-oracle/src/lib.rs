@@ -88,14 +88,13 @@ pub mod pallet {
 	#[derive(Encode, Decode, Default, PartialEq, Eq)]
 	#[cfg_attr(feature = "std", derive(Debug))]
 	pub struct DataRequest<BlockNumber> {
-		para_id: ParaId,
-		parameters: Vec<u8>,
-		feed_name: Vec<u8>,
+		para_id: Option<ParaId>,
 		requested_block_number: BlockNumber,
 		processed_block_number: Option<BlockNumber>,
 		requested_timestamp:u128,
 		processed_timestamp:Option<u128>,
 		payload: Vec<u8>,
+		feed_name: Vec<u8>,
 		url: Vec<u8>,
 	}
 
@@ -161,16 +160,16 @@ pub mod pallet {
 
 		FetchedOffchainDataViaXCM(ParaId, Vec<u8>),
 		RequestedOffchainDataViaXCM(ParaId, Vec<u8>),
-		RequestPriceFeed(ParaId, Vec<u8>),
-		RequestData(ParaId, Vec<u8>,Vec<u8>,Vec<u8> ),
-		ProcessedPriceFeedRequest(ParaId, Vec<u8>, Vec<u8>,),
+		RequestPriceFeed(Option<ParaId>, Vec<u8>, T::BlockNumber),
+		RequestData(ParaId, Vec<u8>,Vec<u8>,T::BlockNumber),
+		ProcessedPriceFeedRequest(Option<ParaId>,Vec<u8>,T::BlockNumber),
 
-		ResponseSent(ParaId,T::BlockNumber,Vec<u8>),
-		ErrorSendingResponse(SendError,ParaId,T::BlockNumber,Vec<u8>),
-		ResponseReceived(ParaId,T::BlockNumber,Vec<u8>),
+		ResponseSent(ParaId,Vec<u8>,T::BlockNumber),
+		ErrorSendingResponse(SendError,ParaId,Vec<u8>,T::BlockNumber),
+		ResponseReceived(ParaId,Vec<u8>,T::BlockNumber),
 
-		ErrorRequestingData(SendError, ParaId, Vec<u8>),
-		ErrorFetchingData(SendError, ParaId, Vec<u8>),
+		ErrorRequestingData(SendError, ParaId, Vec<u8>,T::BlockNumber),
+		ErrorFetchingData(SendError, ParaId, Vec<u8>,T::BlockNumber),
 	}
 
 	#[pallet::validate_unsigned]
@@ -260,7 +259,7 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(0)]
-		pub fn request_data(_origin: OriginFor<T>,  requester_para_id:ParaId, _url: Vec<u8>, _feed_name:Vec<u8>, _parameters: Vec<u8>) -> DispatchResult
+		pub fn request_data(_origin: OriginFor<T>,  requester_para_id:ParaId, url: Vec<u8>, feed_name:Vec<u8>) -> DispatchResult
 		{
 			let index = DataId::<T>::get();
 			let current_block_number = <system::Pallet<T>>::block_number();
@@ -268,23 +267,22 @@ pub mod pallet {
 
 			DataId::<T>::put(index + 1u64);
 			<DataRequests<T>>::insert(index, DataRequest {
-				para_id: requester_para_id,
-				parameters: _parameters.clone(),
-				feed_name: _feed_name.clone(),
+				para_id: Some(requester_para_id),
+				feed_name: feed_name.clone(),
 				requested_block_number:current_block_number,
 				processed_block_number:None,
 				requested_timestamp:current_timestamp,
 				processed_timestamp: None,
 				payload: Vec::new(),
-				url: _url.clone()
+				url: url.clone()
 			});
 			
-			Self::deposit_event(Event::RequestData(requester_para_id, _feed_name.clone(), _url.clone(), _parameters.clone()));
+			Self::deposit_event(Event::RequestData(requester_para_id, feed_name.clone(), url.clone(),current_block_number));
 			Ok(())
 		}
 
 		#[pallet::weight(0)]
-		pub fn request_price_feed(_origin: OriginFor<T>,  requester_para_id:ParaId, requested_currencies: Vec<u8>) -> DispatchResult
+		pub fn request_price_feed(_origin: OriginFor<T>, requested_currencies: Vec<u8>) -> DispatchResult
 		{
 			let index = DataId::<T>::get();
 			let current_block_number = <system::Pallet<T>>::block_number();
@@ -292,25 +290,21 @@ pub mod pallet {
 			let currencies = str::from_utf8(&requested_currencies).unwrap();
 			let api_url = str::from_utf8(b"https://api.kylin-node.co.uk/prices?currency_pairs=").unwrap();
 
-			let _url = api_url.clone().to_owned() + currencies.clone();
-			log::info!("Currencies is  {:?}",currencies);
-			log::info!("api url is  {:?}",api_url);
-			log::info!("full url is  {:?}",_url);
+			let url = api_url.clone().to_owned() + currencies.clone();
 
 			DataId::<T>::put(index + 1u64);
 			<DataRequests<T>>::insert(index, DataRequest {
-				para_id: requester_para_id,
-				parameters: requested_currencies.clone(),
+				para_id: None,
 				feed_name: "price_feeding".as_bytes().to_vec(),
 				requested_block_number:current_block_number,
 				processed_block_number:None,
 				requested_timestamp:current_timestamp,
 				processed_timestamp: None,
 				payload: Vec::new(),
-				url: _url.as_bytes().to_vec()
+				url: url.as_bytes().to_vec()
 			});
 			
-			Self::deposit_event(Event::RequestPriceFeed(requester_para_id, requested_currencies.clone()));
+			Self::deposit_event(Event::RequestPriceFeed(None, requested_currencies.clone(), current_block_number));
 			Ok(())
 		}
 
@@ -322,23 +316,22 @@ pub mod pallet {
 			let current_timestamp = T::UnixTime::now().as_millis();
 			let currencies = str::from_utf8(&requested_currencies).unwrap();
 			let api_url = str::from_utf8(b"https://api.kylin-node.co.uk/prices?currency_pairs=").unwrap();
-			let _url = api_url.clone().to_owned() + currencies.clone();
+			let url = api_url.clone().to_owned() + currencies.clone();
 			let index = DataId::<T>::get();
 			DataId::<T>::put(index + 1u64);
 
 			<DataRequests<T>>::insert(index, DataRequest {
-				para_id: requester_para_id,
-				parameters: requested_currencies.clone(),
+				para_id: Some(requester_para_id),
 				feed_name: "price_feeding".as_bytes().to_vec(),
 				requested_block_number:current_block_number,
 				processed_block_number:None,
 				requested_timestamp:current_timestamp,
 				processed_timestamp: None,
 				payload: Vec::new(),
-				url: _url.as_bytes().to_vec()
+				url: url.as_bytes().to_vec()
 			});
 			
-			Self::deposit_event(Event::RequestPriceFeed(requester_para_id, requested_currencies.clone()));
+			Self::deposit_event(Event::RequestPriceFeed(Some(requester_para_id), requested_currencies.clone(),current_block_number));
 			Ok(())
 		}
 
@@ -346,8 +339,7 @@ pub mod pallet {
 		pub fn receive_response_from_parachain(origin: OriginFor<T>, response:Vec<u8>) -> DispatchResult {
 			let para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
 			let block_number = <system::Pallet<T>>::block_number();
-			log::info!("Response received from Parachain {:?}. Received....{}", para_id,str::from_utf8(&response).unwrap());
-			Self::deposit_event(Event::ResponseReceived(para_id,block_number,response.clone()));
+			Self::deposit_event(Event::ResponseReceived(para_id,response.clone(),block_number));
 			Ok(())
 		}
 
@@ -358,20 +350,16 @@ pub mod pallet {
 			processed_requests: Vec<u64>
 		) -> DispatchResultWithPostInfo {
 			// This ensures that the function can only be called via unsigned transaction.
-			ensure_root(origin)?;
-			
-			log::info!("********** starting to clear requests...... ************");
+			ensure_none(origin)?;
+			let current_block = <system::Pallet<T>>::block_number();
 			for key in processed_requests.iter(){
 				let saved_request = Self::saved_price_feeding_requests(key);
-				Self::deposit_event(Event::ProcessedPriceFeedRequest(saved_request.para_id, saved_request.parameters.clone(), saved_request.payload.clone()));
-				let current_block = <system::Pallet<T>>::block_number();
+				Self::deposit_event(Event::ProcessedPriceFeedRequest(saved_request.para_id, saved_request.payload.clone(),current_block));
 				<DataRequests<T>>::remove(&key);
 				<NextUnsignedAt<T>>::put(current_block);
 			}
-			log::info!("*********** Completed clearing requests...... ************");
 			Ok(().into())
 		}
-
 	}
 
 	impl<T: Config> Pallet<T> {
@@ -443,7 +431,6 @@ pub mod pallet {
 
 			<SavedRequests<T>>::insert(key, DataRequest {
 				para_id: price_feeding_data.para_id,
-				parameters: price_feeding_data.parameters.clone(),
 				feed_name:price_feeding_data.feed_name.clone(),
 				requested_block_number:price_feeding_data.requested_block_number,
 				processed_block_number:Some(block_number),
@@ -451,22 +438,23 @@ pub mod pallet {
 				processed_timestamp: Some(current_timestamp),
 				payload: response,
 				url: price_feeding_data.url.clone()
-
 			});
 		}
 
 		fn send_response_to_parachain(block_number: T::BlockNumber, key:u64) -> DispatchResult {
 			let saved_request = Self::saved_price_feeding_requests(key);
-			match T::XcmSender::send_xcm(
-				(1, Junction::Parachain(saved_request.para_id.into())).into(),
-				Xcm(vec![Transact {
-					origin_type: OriginKind::Native,
-					require_weight_at_most: 1_000,
-					call: <T as Config>::Call::from(Call::<T>::receive_response_from_parachain(saved_request.payload.clone())).encode().into(),
-				},
-				])) {
-				Ok(()) => Self::deposit_event(Event::ResponseSent(saved_request.para_id, block_number, saved_request.payload.clone())),
-				Err(e) => Self::deposit_event(Event::ErrorSendingResponse(e, saved_request.para_id, block_number, saved_request.payload.clone())),
+			if saved_request.para_id.is_some(){
+				match T::XcmSender::send_xcm(
+					(1, Junction::Parachain(saved_request.para_id.unwrap().into())).into(),
+					Xcm(vec![Transact {
+						origin_type: OriginKind::Native,
+						require_weight_at_most: 1_000,
+						call: <T as Config>::Call::from(Call::<T>::receive_response_from_parachain(saved_request.payload.clone())).encode().into(),
+					},
+					])) {
+					Ok(()) => Self::deposit_event(Event::ResponseSent(saved_request.para_id.unwrap(), saved_request.payload.clone(),block_number)),
+					Err(e) => Self::deposit_event(Event::ErrorSendingResponse(e, saved_request.para_id.unwrap(), saved_request.payload.clone(),block_number)),
+				}
 			}
 			Ok(())
 
@@ -484,16 +472,8 @@ pub mod pallet {
 			let block_number = <system::Pallet<T>>::block_number();
 			let mut processed_requests: Vec<u64>  = Vec::new();
 			for (key, val) in <DataRequests<T> as IterableStorageMap<_, _>>::iter() {
-				let currencies = str::from_utf8(&val.parameters).unwrap();
-				// let api_url = str::from_utf8(b"https://api.kylin-node.co.uk/prices?currency_pairs=").unwrap();
-
 				let url = str::from_utf8(&val.url).unwrap();
-				log::info!("Signed. Currencies are  {:?}",currencies);
-				log::info!("Signed. full url is  {:?}",url);
-
 				let response = Self::fetch_http_get_result(&url.clone()).unwrap_or("Failed fetch data".as_bytes().to_vec());
-				log::info!("signed request completed");
-
 				processed_requests.push(key);
 				let results = signer.send_signed_transaction(|_account| Call::submit_request_data(block_number, key, response.clone()));
 				for (acc, res) in &results {
@@ -503,7 +483,6 @@ pub mod pallet {
 					}
 				}
 			}
-
 			if processed_requests.iter().count() > 0 {
 				let results = signer.send_signed_transaction(|_account| Call::clear_processed_requests_unsigned(block_number, processed_requests.clone()));
 				for (acc, res) in &results {
@@ -525,13 +504,9 @@ pub mod pallet {
 			let mut processed_requests: Vec<u64>  = Vec::new();
 			
 			for (key, val) in <DataRequests<T> as IterableStorageMap<_, _>>::iter() {
-				let currencies = str::from_utf8(&val.parameters).unwrap();
 				let url = str::from_utf8(&val.url).unwrap();
-				log::info!("unsigned Currencies are  {:?}",currencies);
-				log::info!("unsigned full url is  {:?}",url);
 
 				let response = Self::fetch_http_get_result(&url.clone()).unwrap_or("Failed fetch data".as_bytes().to_vec());
-				log::info!("unsigned request completed");
 				processed_requests.push(key);
 				let result = SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(Call::submit_price_request_unsigned(block_number,key, response).into());
 				if let Err(e) = result {
@@ -554,15 +529,20 @@ pub mod pallet {
 			// deadline to 2s to complete the external call.
 			// You can also wait idefinitely for the response, however you may still get a timeout
 			// coming from the host machine.
-			let deadline = sp_io::offchain::timestamp().add(Duration::from_millis(30_000));
+			let deadline = sp_io::offchain::timestamp().add(Duration::from_millis(10_000));
 			// Initiate an external HTTP GET request.
 			// This is using high-level wrappers from `sp_runtime`, for the low-level calls that
 			// you can find in `sp_io`. The API is trying to be similar to `reqwest`, but
 			// since we are running in a custom WASM execution environment we can't simply
 			// import the library here.
+
+			// let request =
+			// http::Request::get("https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD");
+			// let request =
+			// http::Request::get("http://api.kylin-node.co.uk/prices?currency_pairs=kyl_usd");
 			let request = http::Request::get(url);
-			log::info!("Requesting URL is {:?}", url);
-			// We set the deadline for sending of the request, note that awaiting response can
+			
+			// We set the deadline for sending of the request, note that awaiting response can§
 			// have a separate deadline. Next we send the request, before that it's also possible
 			// to alter request headers or stream body content in case of non-GET requests.
 			let pending = request
@@ -579,6 +559,7 @@ pub mod pallet {
 			let response = pending
 				.try_wait(deadline)
 				.map_err(|_| http::Error::DeadlineReached)??;
+
 			// Let's check the status code before we proceed to reading the response.
 			if response.code != 200 {
 				log::info!("Unexpected status code: {}", response.code);
@@ -589,13 +570,11 @@ pub mod pallet {
 			// Note that the return object allows you to read the body in chunks as well
 			// with a way to control the deadline.
 			let body = response.body().collect::<Vec<u8>>();
-
 			// Create a str slice from the body.
 			let body_str = sp_std::str::from_utf8(&body).map_err(|_| {
 				log::info!("No UTF8 body");
 				http::Error::Unknown
 			})?;
-			log::info!("fetch_http_get_result Got {} result: {}", url, body_str);
 
 			Ok(body_str.as_bytes().to_vec())
 		}
