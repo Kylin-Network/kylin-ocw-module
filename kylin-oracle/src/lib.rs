@@ -536,10 +536,6 @@ pub mod pallet {
 			// since we are running in a custom WASM execution environment we can't simply
 			// import the library here.
 
-			// let request =
-			// http::Request::get("https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD");
-			// let request =
-			// http::Request::get("http://api.kylin-node.co.uk/prices?currency_pairs=kyl_usd");
 			let request = http::Request::get(url);
 			
 			// We set the deadline for sending of the request, note that awaiting response can§
