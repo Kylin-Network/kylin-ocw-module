@@ -66,8 +66,9 @@ pub mod pallet {
 	use frame_system::{
 		self as system,
 		offchain::{
-			AppCrypto, CreateSignedTransaction, SendSignedTransaction, Signer,SubmitTransaction
-		}
+			AppCrypto, CreateSignedTransaction, SendSignedTransaction, SendUnsignedTransaction,
+			SignedPayload, Signer, SigningTypes, SubmitTransaction,
+		},
 	};
 	use sp_runtime::{
 		traits::Zero,
@@ -145,7 +146,6 @@ pub mod pallet {
 	#[pallet::getter(fn saved_price_feeding_requests)]
 	pub type SavedRequests<T: Config> = StorageMap<_, Identity, u64, DataRequest< T::BlockNumber>, ValueQuery>;
 
-
 	#[pallet::storage]
 	#[pallet::getter(fn next_unsigned_at)]
 	pub(super) type NextUnsignedAt<T: Config> = StorageValue<_, T::BlockNumber, ValueQuery>;
@@ -161,7 +161,7 @@ pub mod pallet {
 		FetchedOffchainDataViaXCM(ParaId, Vec<u8>),
 		RequestedOffchainDataViaXCM(ParaId, Vec<u8>),
 		RequestPriceFeed(Option<ParaId>, Vec<u8>, T::BlockNumber),
-		RequestData(ParaId, Vec<u8>,Vec<u8>,T::BlockNumber),
+		RequestData(Option<ParaId>, Vec<u8>,Vec<u8>,T::BlockNumber),
 		ProcessedPriceFeedRequest(Option<ParaId>,Vec<u8>,T::BlockNumber),
 
 		ResponseSent(ParaId,Vec<u8>,T::BlockNumber),
@@ -242,7 +242,7 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn submit_request_data(origin: OriginFor<T>,  block_number: T::BlockNumber, key: u64, data: Vec<u8>) -> DispatchResult {
+		pub fn submit_request_data(origin: OriginFor<T>, block_number: T::BlockNumber, key: u64, data: Vec<u8>) -> DispatchResult {
 			// Check that the extrinsic was signed and get the signer.
 			// This function will return an error if the extrinsic is not signed.
 			// https://substrate.dev/docs/en/knowledgebase/runtime/origin
@@ -252,87 +252,42 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn submit_price_request_unsigned(origin: OriginFor<T>,block_number: T::BlockNumber, key: u64,data: Vec<u8>) -> DispatchResult {
+		pub fn submit_price_request_unsigned(origin: OriginFor<T>, block_number: T::BlockNumber, key: u64,data: Vec<u8>) -> DispatchResult {
 			ensure_none(origin.clone())?;
 			Self::save_data_response_onchain(block_number, key, data);
 			Self::send_response_to_parachain(block_number, key)
 		}
 
-		#[pallet::weight(0)]
-		pub fn request_data(_origin: OriginFor<T>,  requester_para_id:ParaId, url: Vec<u8>, feed_name:Vec<u8>) -> DispatchResult
+		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
+		pub fn request_data(_origin: OriginFor<T>,requester_para_id:Option<ParaId>, url: Vec<u8>, feed_name:Vec<u8>) -> DispatchResult
 		{
-			let index = DataId::<T>::get();
-			let current_block_number = <system::Pallet<T>>::block_number();
-			let current_timestamp = T::UnixTime::now().as_millis();
-
-			DataId::<T>::put(index + 1u64);
-			<DataRequests<T>>::insert(index, DataRequest {
-				para_id: Some(requester_para_id),
-				feed_name: feed_name.clone(),
-				requested_block_number:current_block_number,
-				processed_block_number:None,
-				requested_timestamp:current_timestamp,
-				processed_timestamp: None,
-				payload: Vec::new(),
-				url: url.clone()
-			});
-			
-			Self::deposit_event(Event::RequestData(requester_para_id, feed_name.clone(), url.clone(),current_block_number));
-			Ok(())
+			Self::add_data_request(requester_para_id, url.clone(), feed_name.clone())
 		}
 
-		#[pallet::weight(0)]
-		pub fn request_price_feed(_origin: OriginFor<T>, requested_currencies: Vec<u8>) -> DispatchResult
+		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
+		pub fn request_data_via_xcm(origin: OriginFor<T>, url: Vec<u8>, feed_name:Vec<u8>) -> DispatchResult
 		{
-			let index = DataId::<T>::get();
-			let current_block_number = <system::Pallet<T>>::block_number();
-			let current_timestamp = T::UnixTime::now().as_millis();
+			let requester_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
+			Self::add_data_request(Some(requester_para_id), url, feed_name)
+		}
+
+		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
+		pub fn request_price_feed(_origin: OriginFor<T>, requester_para_id:Option<ParaId>, requested_currencies: Vec<u8>) -> DispatchResult
+		{
 			let currencies = str::from_utf8(&requested_currencies).unwrap();
 			let api_url = str::from_utf8(b"https://api.kylin-node.co.uk/prices?currency_pairs=").unwrap();
-
 			let url = api_url.clone().to_owned() + currencies.clone();
-
-			DataId::<T>::put(index + 1u64);
-			<DataRequests<T>>::insert(index, DataRequest {
-				para_id: None,
-				feed_name: "price_feeding".as_bytes().to_vec(),
-				requested_block_number:current_block_number,
-				processed_block_number:None,
-				requested_timestamp:current_timestamp,
-				processed_timestamp: None,
-				payload: Vec::new(),
-				url: url.as_bytes().to_vec()
-			});
-			
-			Self::deposit_event(Event::RequestPriceFeed(None, requested_currencies.clone(), current_block_number));
-			Ok(())
+			Self::add_data_request(requester_para_id, url.clone().as_bytes().to_vec(), "price_feeding".as_bytes().to_vec())
 		}
 
-		#[pallet::weight(0)]
+		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
 		pub fn request_price_feed_via_xcm(origin: OriginFor<T>,  requested_currencies: Vec<u8>) -> DispatchResult
 		{
 			let requester_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
-			let current_block_number = <system::Pallet<T>>::block_number();
-			let current_timestamp = T::UnixTime::now().as_millis();
 			let currencies = str::from_utf8(&requested_currencies).unwrap();
 			let api_url = str::from_utf8(b"https://api.kylin-node.co.uk/prices?currency_pairs=").unwrap();
 			let url = api_url.clone().to_owned() + currencies.clone();
-			let index = DataId::<T>::get();
-			DataId::<T>::put(index + 1u64);
-
-			<DataRequests<T>>::insert(index, DataRequest {
-				para_id: Some(requester_para_id),
-				feed_name: "price_feeding".as_bytes().to_vec(),
-				requested_block_number:current_block_number,
-				processed_block_number:None,
-				requested_timestamp:current_timestamp,
-				processed_timestamp: None,
-				payload: Vec::new(),
-				url: url.as_bytes().to_vec()
-			});
-			
-			Self::deposit_event(Event::RequestPriceFeed(Some(requester_para_id), requested_currencies.clone(),current_block_number));
-			Ok(())
+			Self::add_data_request(Some(requester_para_id), url.clone().as_bytes().to_vec(), "price_feeding".as_bytes().to_vec())
 		}
 
 		#[pallet::weight(0)]
@@ -422,6 +377,25 @@ pub mod pallet {
 				// already did.
 				Err(MutateStorageError::ConcurrentModification(_)) => TransactionType::None,
 			}
+		}
+
+		fn add_data_request(para_id:Option<ParaId>, url: Vec<u8>, feed_name:Vec<u8>) -> DispatchResult {
+			let index = DataId::<T>::get();
+			let current_block_number = <system::Pallet<T>>::block_number();
+			let current_timestamp = T::UnixTime::now().as_millis();
+			DataId::<T>::put(index + 1u64);
+			<DataRequests<T>>::insert(index, DataRequest {
+				para_id: para_id,
+				feed_name: feed_name.clone(),
+				requested_block_number:current_block_number,
+				processed_block_number:None,
+				requested_timestamp:current_timestamp,
+				processed_timestamp: None,
+				payload: Vec::new(),
+				url: url.clone()
+			});
+			Self::deposit_event(Event::RequestData(para_id, feed_name.clone(), url.clone(),current_block_number));
+			Ok(())
 		}
 
 		fn save_data_response_onchain(block_number:T::BlockNumber, key: u64,response: Vec<u8>) -> ()  {
@@ -575,8 +549,7 @@ pub mod pallet {
 			Ok(body_str.as_bytes().to_vec())
 		}
 	
-
-	fn validate_transaction(block_number: &T::BlockNumber) -> TransactionValidity {
+		fn validate_transaction(block_number: &T::BlockNumber) -> TransactionValidity {
 
 		// Now let's check if the transaction has any chance to succeed.
 		let next_unsigned_at = <NextUnsignedAt<T>>::get();
@@ -588,13 +561,13 @@ pub mod pallet {
 		if &current_block < block_number {
 			return InvalidTransaction::Future.into();
 		}
-		ValidTransaction::with_tag_prefix("Kylin OCW")
+		ValidTransaction::with_tag_prefix("KylinOCW")
 			.priority(T::UnsignedPriority::get())
 			.longevity(5)
 			.propagate(true)
 			.build()
 	
 	}
-}
+	}
 }
 
