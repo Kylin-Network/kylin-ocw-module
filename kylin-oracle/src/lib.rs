@@ -7,8 +7,8 @@ pub use pallet::*;
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "runtime-benchmarks")]
-mod benchmarking;
+// #[cfg(feature = "runtime-benchmarks")]
+// mod benchmarking;
 
 use sp_core::crypto::KeyTypeId;
 
@@ -66,8 +66,8 @@ pub mod pallet {
 	use frame_system::{
 		self as system,
 		offchain::{
-			AppCrypto, CreateSignedTransaction, SendSignedTransaction, SendUnsignedTransaction,
-			SignedPayload, Signer, SigningTypes, SubmitTransaction,
+			AppCrypto, CreateSignedTransaction, SendSignedTransaction,
+			 Signer, SubmitTransaction,
 		},
 	};
 	use sp_runtime::{
@@ -86,7 +86,7 @@ pub mod pallet {
 		None,
 	}
 
-	#[derive(Encode, Decode, Default, PartialEq, Eq)]
+	#[derive(Clone, Encode, Decode, Default, PartialEq, Eq)]
 	#[cfg_attr(feature = "std", derive(Debug))]
 	pub struct DataRequest<BlockNumber> {
 		para_id: Option<ParaId>,
@@ -154,22 +154,11 @@ pub mod pallet {
 	#[pallet::metadata(T::AccountId = "AccountId")]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
-		/// Event documentation should end with an array that provides descriptive names for event
-		/// parameters. [data, who]
-		FetchedOffchainData(u64, T::AccountId),
-
-		FetchedOffchainDataViaXCM(ParaId, Vec<u8>),
-		RequestedOffchainDataViaXCM(ParaId, Vec<u8>),
-		RequestPriceFeed(Option<ParaId>, Vec<u8>, T::BlockNumber),
 		RequestData(Option<ParaId>, Vec<u8>,Vec<u8>,T::BlockNumber),
-		ProcessedPriceFeedRequest(Option<ParaId>,Vec<u8>,T::BlockNumber),
-
-		ResponseSent(ParaId,Vec<u8>,T::BlockNumber),
-		ErrorSendingResponse(SendError,ParaId,Vec<u8>,T::BlockNumber),
-		ResponseReceived(ParaId,Vec<u8>,T::BlockNumber),
-
-		ErrorRequestingData(SendError, ParaId, Vec<u8>,T::BlockNumber),
-		ErrorFetchingData(SendError, ParaId, Vec<u8>,T::BlockNumber),
+		ProcessedPriceFeedRequest(Option<ParaId>,Vec<u8>,DataRequest<T::BlockNumber>),
+		ResponseSent(ParaId,DataRequest<T::BlockNumber>,T::BlockNumber),
+		ErrorSendingResponse(SendError,ParaId,DataRequest< T::BlockNumber>),
+		ResponseReceived(ParaId,Vec<u8>,Vec<u8>,T::BlockNumber),
 	}
 
 	#[pallet::validate_unsigned]
@@ -261,7 +250,8 @@ pub mod pallet {
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
 		pub fn request_data(_origin: OriginFor<T>,requester_para_id:Option<ParaId>, url: Vec<u8>, feed_name:Vec<u8>) -> DispatchResult
 		{
-			Self::add_data_request(requester_para_id, url.clone(), feed_name.clone())
+			let new_feed_name = str::from_utf8(b"custom_feed_").unwrap().to_owned() + str::from_utf8(&feed_name).unwrap();
+			Self::add_data_request(requester_para_id, url.clone(), new_feed_name.as_bytes().to_vec().clone())
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
@@ -291,10 +281,10 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(0)]
-		pub fn receive_response_from_parachain(origin: OriginFor<T>, response:Vec<u8>) -> DispatchResult {
+		pub fn receive_response_from_parachain(origin: OriginFor<T>, feed_name:Vec<u8>, response:Vec<u8>) -> DispatchResult {
 			let para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
 			let block_number = <system::Pallet<T>>::block_number();
-			Self::deposit_event(Event::ResponseReceived(para_id,response.clone(),block_number));
+			Self::deposit_event(Event::ResponseReceived(para_id,feed_name.clone(),response.clone(),block_number));
 			Ok(())
 		}
 
@@ -306,12 +296,27 @@ pub mod pallet {
 		) -> DispatchResultWithPostInfo {
 			// This ensures that the function can only be called via unsigned transaction.
 			ensure_none(origin)?;
-			let current_block = <system::Pallet<T>>::block_number();
+			let current_block_number = <system::Pallet<T>>::block_number();
+			let current_timestamp = T::UnixTime::now().as_millis();
+
 			for key in processed_requests.iter(){
 				let saved_request = Self::saved_price_feeding_requests(key);
-				Self::deposit_event(Event::ProcessedPriceFeedRequest(saved_request.para_id, saved_request.payload.clone(),current_block));
+
+				let processed_request =  DataRequest {
+					para_id: saved_request.para_id,
+					feed_name:saved_request.feed_name.clone(),
+					requested_block_number:saved_request.requested_block_number,
+					processed_block_number:Some(current_block_number),
+					requested_timestamp:saved_request.requested_timestamp,
+					processed_timestamp: Some(current_timestamp),
+					payload: saved_request.payload.clone(),
+					url: saved_request.url.clone()
+				};
+
+				<SavedRequests<T>>::insert(key,processed_request.clone());
+				Self::deposit_event(Event::ProcessedPriceFeedRequest(saved_request.para_id,saved_request.feed_name.clone(), processed_request.clone()));
 				<DataRequests<T>>::remove(&key);
-				<NextUnsignedAt<T>>::put(current_block);
+				<NextUnsignedAt<T>>::put(current_block_number);
 			}
 			Ok(().into())
 		}
@@ -423,11 +428,11 @@ pub mod pallet {
 					Xcm(vec![Transact {
 						origin_type: OriginKind::Native,
 						require_weight_at_most: 1_000,
-						call: <T as Config>::Call::from(Call::<T>::receive_response_from_parachain(saved_request.payload.clone())).encode().into(),
+						call: <T as Config>::Call::from(Call::<T>::receive_response_from_parachain(saved_request.feed_name.clone(),saved_request.payload.clone())).encode().into(),
 					},
 					])) {
-					Ok(()) => Self::deposit_event(Event::ResponseSent(saved_request.para_id.unwrap(), saved_request.payload.clone(),block_number)),
-					Err(e) => Self::deposit_event(Event::ErrorSendingResponse(e, saved_request.para_id.unwrap(), saved_request.payload.clone(),block_number)),
+					Ok(()) => Self::deposit_event(Event::ResponseSent(saved_request.para_id.unwrap(),saved_request, block_number)),
+					Err(e) => Self::deposit_event(Event::ErrorSendingResponse(e, saved_request.para_id.unwrap(), saved_request)),
 				}
 			}
 			Ok(())
@@ -550,7 +555,6 @@ pub mod pallet {
 		}
 	
 		fn validate_transaction(block_number: &T::BlockNumber) -> TransactionValidity {
-
 		// Now let's check if the transaction has any chance to succeed.
 		let next_unsigned_at = <NextUnsignedAt<T>>::get();
 		if &next_unsigned_at > block_number {
@@ -567,7 +571,7 @@ pub mod pallet {
 			.propagate(true)
 			.build()
 	
-	}
+		}
 	}
 }
 
