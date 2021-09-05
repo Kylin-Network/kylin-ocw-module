@@ -250,7 +250,7 @@ pub mod pallet {
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
 		pub fn request_data(_origin: OriginFor<T>,requester_para_id:Option<ParaId>, url: Vec<u8>, feed_name:Vec<u8>) -> DispatchResult
 		{
-			let new_feed_name = str::from_utf8(b"custom_feed_").unwrap().to_owned() + str::from_utf8(&feed_name).unwrap();
+			let new_feed_name = str::from_utf8(b"custom_").unwrap().to_owned() + str::from_utf8(&feed_name).unwrap();
 			Self::add_data_request(requester_para_id, url.clone(), new_feed_name.as_bytes().to_vec().clone())
 		}
 
