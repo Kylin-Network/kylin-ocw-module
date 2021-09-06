@@ -88,8 +88,9 @@ pub mod pallet {
 
 	#[derive(Clone, Encode, Decode, Default, PartialEq, Eq)]
 	#[cfg_attr(feature = "std", derive(Debug))]
-	pub struct DataRequest<BlockNumber> {
+	pub struct DataRequest<BlockNumber,AccountId> {
 		para_id: Option<ParaId>,
+		account_id: Option<AccountId>,
 		requested_block_number: BlockNumber,
 		processed_block_number: Option<BlockNumber>,
 		requested_timestamp:u128,
@@ -139,12 +140,12 @@ pub mod pallet {
 
 	#[pallet::storage]
 	#[pallet::getter(fn price_feeding_requests)]
-	pub type DataRequests<T: Config> = StorageMap<_, Identity, u64, DataRequest< T::BlockNumber>, ValueQuery>;
+	pub type DataRequests<T: Config> = StorageMap<_, Identity, u64, DataRequest<T::BlockNumber, T::AccountId>, ValueQuery>;
 
 
 	#[pallet::storage]
 	#[pallet::getter(fn saved_price_feeding_requests)]
-	pub type SavedRequests<T: Config> = StorageMap<_, Identity, u64, DataRequest< T::BlockNumber>, ValueQuery>;
+	pub type SavedRequests<T: Config> = StorageMap<_, Identity, u64, DataRequest<T::BlockNumber, T::AccountId>, ValueQuery>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn next_unsigned_at)]
@@ -154,10 +155,10 @@ pub mod pallet {
 	#[pallet::metadata(T::AccountId = "AccountId")]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
-		RequestData(Option<ParaId>, Vec<u8>,Vec<u8>,T::BlockNumber),
-		ProcessedPriceFeedRequest(Option<ParaId>,Vec<u8>,DataRequest<T::BlockNumber>),
-		ResponseSent(ParaId,DataRequest<T::BlockNumber>,T::BlockNumber),
-		ErrorSendingResponse(SendError,ParaId,DataRequest< T::BlockNumber>),
+		RequestData(Option<ParaId>, Vec<u8>,Vec<u8>,Option<T::AccountId>, T::BlockNumber),
+		ProcessedDataRequest(Option<ParaId>,Vec<u8>,DataRequest<T::BlockNumber, T::AccountId>),
+		ResponseSent(ParaId,DataRequest<T::BlockNumber, T::AccountId>,T::BlockNumber),
+		ErrorSendingResponse(SendError,ParaId,DataRequest<T::BlockNumber, T::AccountId>),
 		ResponseReceived(ParaId,Vec<u8>,Vec<u8>,T::BlockNumber),
 	}
 
@@ -248,36 +249,40 @@ pub mod pallet {
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn request_data(_origin: OriginFor<T>,requester_para_id:Option<ParaId>, url: Vec<u8>, feed_name:Vec<u8>) -> DispatchResult
+		pub fn request_data(origin: OriginFor<T>,requester_para_id:Option<ParaId>, url: Vec<u8>, feed_name:Vec<u8>) -> DispatchResult
 		{
 			let new_feed_name = str::from_utf8(b"custom_").unwrap().to_owned() + str::from_utf8(&feed_name).unwrap();
-			Self::add_data_request(requester_para_id, url.clone(), new_feed_name.as_bytes().to_vec().clone())
+			let requster_account_id = ensure_signed(origin.clone())?;
+			Self::add_data_request(Some(requster_account_id),requester_para_id, url.clone(), new_feed_name.as_bytes().to_vec().clone())
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
 		pub fn request_data_via_xcm(origin: OriginFor<T>, url: Vec<u8>, feed_name:Vec<u8>) -> DispatchResult
 		{
-			let requester_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
-			Self::add_data_request(Some(requester_para_id), url, feed_name)
+			let requester_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin.clone()))?;
+			let requester_account_id = ensure_signed(origin.clone())?;
+			Self::add_data_request(Some(requester_account_id),Some(requester_para_id), url, feed_name)
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
-		pub fn request_price_feed(_origin: OriginFor<T>, requester_para_id:Option<ParaId>, requested_currencies: Vec<u8>) -> DispatchResult
+		pub fn request_price_feed(origin: OriginFor<T>, requester_para_id:Option<ParaId>, requested_currencies: Vec<u8>) -> DispatchResult
 		{
+			let requester_account_id = ensure_signed(origin)?;
 			let currencies = str::from_utf8(&requested_currencies).unwrap();
 			let api_url = str::from_utf8(b"https://api.kylin-node.co.uk/prices?currency_pairs=").unwrap();
 			let url = api_url.clone().to_owned() + currencies.clone();
-			Self::add_data_request(requester_para_id, url.clone().as_bytes().to_vec(), "price_feeding".as_bytes().to_vec())
+			Self::add_data_request(Some(requester_account_id),requester_para_id, url.clone().as_bytes().to_vec(), "price_feeding".as_bytes().to_vec())
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]
 		pub fn request_price_feed_via_xcm(origin: OriginFor<T>,  requested_currencies: Vec<u8>) -> DispatchResult
 		{
-			let requester_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
+			let requester_account_id = ensure_signed(origin.clone())?;
+			let requester_para_id = ensure_sibling_para(<T as Config>::Origin::from(origin.clone()))?;
 			let currencies = str::from_utf8(&requested_currencies).unwrap();
 			let api_url = str::from_utf8(b"https://api.kylin-node.co.uk/prices?currency_pairs=").unwrap();
 			let url = api_url.clone().to_owned() + currencies.clone();
-			Self::add_data_request(Some(requester_para_id), url.clone().as_bytes().to_vec(), "price_feeding".as_bytes().to_vec())
+			Self::add_data_request(Some(requester_account_id), Some(requester_para_id), url.clone().as_bytes().to_vec(), "price_feeding".as_bytes().to_vec())
 		}
 
 		#[pallet::weight(0)]
@@ -304,6 +309,7 @@ pub mod pallet {
 
 				let processed_request =  DataRequest {
 					para_id: saved_request.para_id,
+					account_id: saved_request.account_id,
 					feed_name:saved_request.feed_name.clone(),
 					requested_block_number:saved_request.requested_block_number,
 					processed_block_number:Some(current_block_number),
@@ -314,7 +320,7 @@ pub mod pallet {
 				};
 
 				<SavedRequests<T>>::insert(key,processed_request.clone());
-				Self::deposit_event(Event::ProcessedPriceFeedRequest(saved_request.para_id,saved_request.feed_name.clone(), processed_request.clone()));
+				Self::deposit_event(Event::ProcessedDataRequest(saved_request.para_id,saved_request.feed_name.clone(), processed_request.clone()));
 				<DataRequests<T>>::remove(&key);
 				<NextUnsignedAt<T>>::put(current_block_number);
 			}
@@ -384,13 +390,15 @@ pub mod pallet {
 			}
 		}
 
-		fn add_data_request(para_id:Option<ParaId>, url: Vec<u8>, feed_name:Vec<u8>) -> DispatchResult {
+
+		fn add_data_request(account_id:Option<T::AccountId>, para_id:Option<ParaId>, url: Vec<u8>, feed_name:Vec<u8>) -> DispatchResult {
 			let index = DataId::<T>::get();
 			let current_block_number = <system::Pallet<T>>::block_number();
 			let current_timestamp = T::UnixTime::now().as_millis();
 			DataId::<T>::put(index + 1u64);
 			<DataRequests<T>>::insert(index, DataRequest {
 				para_id: para_id,
+				account_id:account_id.clone(),
 				feed_name: feed_name.clone(),
 				requested_block_number:current_block_number,
 				processed_block_number:None,
@@ -399,7 +407,7 @@ pub mod pallet {
 				payload: Vec::new(),
 				url: url.clone()
 			});
-			Self::deposit_event(Event::RequestData(para_id, feed_name.clone(), url.clone(),current_block_number));
+			Self::deposit_event(Event::RequestData(para_id, feed_name.clone(), url.clone(),account_id.clone(),current_block_number));
 			Ok(())
 		}
 
@@ -410,6 +418,7 @@ pub mod pallet {
 
 			<SavedRequests<T>>::insert(key, DataRequest {
 				para_id: price_feeding_data.para_id,
+				account_id:price_feeding_data.account_id,
 				feed_name:price_feeding_data.feed_name.clone(),
 				requested_block_number:price_feeding_data.requested_block_number,
 				processed_block_number:Some(block_number),
