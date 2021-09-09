@@ -106,14 +106,6 @@ pub mod pallet	{
 	#[pallet::generate_store(pub(super) trait Store)]
 	pub struct Pallet<T>(_);
 
-	// // Errors inform users that something went wrong.
-	// #[pallet::error]
-	// pub enum Error<T> {
-	// 	/// Error names should be descriptive.
-	// 	NoneValue,
-	// 	/// Errors should have helpful documentation associated with them.
-	// 	StorageOverflow,
-	// }
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 
@@ -157,7 +149,8 @@ pub mod pallet	{
 		{
 			ensure_signed(origin.clone())?;
 			let requester_account_id = ensure_signed(origin.clone())?;
-			Self::add_data_request(Some(requester_account_id), None, None,feed_name.clone(),data)
+			let new_feed_name = str::from_utf8(b"custom_").unwrap().to_owned() + str::from_utf8(&feed_name).unwrap();
+			Self::add_data_request(Some(requester_account_id), None, None,new_feed_name.as_bytes().to_vec(),data)
 		}
 
 		#[pallet::weight(10_000 + T::DbWeight::get().writes(1))]

@@ -245,7 +245,7 @@ impl cumulus_pallet_xcm::Config for Test {
 }
 
 #[test]
-fn should_save_data_onchain_for_signed_requests() {
+fn should_save_data_onchain_for_signed_data_submissions() {
 	const PHRASE: &str =
 	"news slush supreme milk chapter athlete soap sausage put clutch what kitten";
 	let (offchain, offchain_state) = testing::TestOffchainExt::new();
@@ -297,7 +297,7 @@ fn should_save_data_onchain_for_signed_requests() {
 }
 
 #[test]
-fn should_save_data_onchain_for_unsigned_requests() {
+fn should_save_data_onchain_for_unsigned_submissions() {
 	// const PHRASE: &str =
 	// "news slush supreme milk chapter athlete soap sausage put clutch what kitten";
 	let (offchain, offchain_state) = testing::TestOffchainExt::new();
@@ -341,7 +341,7 @@ fn should_save_data_onchain_for_unsigned_requests() {
 }
 
 #[test]
-fn should_save_submitted_data_onchain_for_signed_requests() {
+fn should_write_data_onchain_directly_for_signed_requests() {
 	const PHRASE: &str =
 		"news slush supreme milk chapter athlete soap sausage put clutch what kitten";
 	let (offchain, _offchain_state) = testing::TestOffchainExt::new();
@@ -388,8 +388,6 @@ fn should_save_submitted_data_onchain_for_signed_requests() {
 		}
 	});
 }
-
-
 
 fn mock_response(state: &mut testing::OffchainState) {
 	state.expect_request(testing::PendingRequest {
