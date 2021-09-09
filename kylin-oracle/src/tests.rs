@@ -176,8 +176,8 @@ parameter_types! {
 }
 pub struct InvertNothing;
 impl InvertLocation for InvertNothing {
-	fn invert_location(_: &MultiLocation) -> sp_std::result::Result<MultiLocation, ()> {
-		Ok(Here.into())
+	fn invert_location(_: &MultiLocation) -> MultiLocation {
+		Here.into()
 	}
 }
 
@@ -217,9 +217,6 @@ impl xcm_executor::Config for XcmConfig {
 	type Weigher = FixedWeightBounds<UnitWeightCost, Call, MaxInstructions>;
 	type Trader = DummyWeightTrader;
 	type ResponseHandler = ();
-	type AssetTrap = ();
-	type AssetClaims = ();
-	type SubscriptionService = ();
 }
 
 impl pallet_xcm::Config for Test {
@@ -235,8 +232,6 @@ impl pallet_xcm::Config for Test {
 	type XcmReserveTransferFilter = Everything;
 	type Origin = Origin;
 	type Call = Call;
-	const VERSION_DISCOVERY_QUEUE_SIZE: u32 = 100;
-	type AdvertisedXcmVersion = pallet_xcm::CurrentXcmVersion;
 }
 
 impl cumulus_pallet_xcm::Config for Test {
@@ -267,7 +262,7 @@ fn should_save_data_onchain_for_signed_data_submissions() {
 	mock_response(&mut offchain_state.write());
 	let expected_response = br#"{"USD": 155.23}"#.to_vec();
 	t.execute_with(|| {
-		KylinOracle::submit_price_feed(Origin::signed(Default::default()),str::from_utf8(b"btc_usd").unwrap().as_bytes().to_vec()).unwrap();
+		KylinOracle::submit_price_feed(Origin::signed(Default::default()),None,str::from_utf8(b"btc_usd").unwrap().as_bytes().to_vec()).unwrap();
 		KylinOracle::fetch_data_and_send_signed(1).unwrap();
 
 		let tx1 = pool_state.write().transactions.pop().unwrap();
@@ -312,7 +307,7 @@ fn should_save_data_onchain_for_unsigned_submissions() {
 	mock_response(&mut offchain_state.write());
 	let expected_response = br#"{"USD": 155.23}"#.to_vec();
 	t.execute_with(|| {
-		KylinOracle::submit_price_feed(Origin::signed(Default::default()),str::from_utf8(b"btc_usd").unwrap().as_bytes().to_vec()).unwrap();
+		KylinOracle::submit_price_feed(Origin::signed(Default::default()),None,str::from_utf8(b"btc_usd").unwrap().as_bytes().to_vec()).unwrap();
 		KylinOracle::fetch_data_and_send_raw_unsigned(1).unwrap();
 
 		let tx1 = pool_state.write().transactions.pop().unwrap();
