@@ -245,7 +245,7 @@ impl cumulus_pallet_xcm::Config for Test {
 }
 
 #[test]
-fn should_submit_raw_signed_transaction_on_chain() {
+fn should_save_data_onchain_for_signed_requests() {
 	const PHRASE: &str =
 	"news slush supreme milk chapter athlete soap sausage put clutch what kitten";
 	let (offchain, offchain_state) = testing::TestOffchainExt::new();
@@ -267,13 +267,13 @@ fn should_submit_raw_signed_transaction_on_chain() {
 	mock_response(&mut offchain_state.write());
 	let expected_response = br#"{"USD": 155.23}"#.to_vec();
 	t.execute_with(|| {
-		KylinOracle::request_price_feed(Origin::signed(Default::default()),str::from_utf8(b"btc_usd").unwrap().as_bytes().to_vec()).unwrap();
-		KylinOracle::fetch_data_and_send_signed().unwrap();
+		KylinOracle::submit_price_feed(Origin::signed(Default::default()),str::from_utf8(b"btc_usd").unwrap().as_bytes().to_vec()).unwrap();
+		KylinOracle::fetch_data_and_send_signed(1).unwrap();
 
 		let tx1 = pool_state.write().transactions.pop().unwrap();
 		let tx2 = pool_state.write().transactions.pop().unwrap();
 
-		let _tx1 = Extrinsic::decode(&mut &*tx1).unwrap();
+		let tx1 = Extrinsic::decode(&mut &*tx1).unwrap();
 		let tx2 = Extrinsic::decode(&mut &*tx2).unwrap();
 
 		if let Call::KylinOracle(crate::Call::submit_data_signed(
@@ -285,11 +285,19 @@ fn should_submit_raw_signed_transaction_on_chain() {
 			assert_eq!(response, expected_response);
 		}
 
+		if let Call::KylinOracle(crate::Call::clear_processed_requests_unsigned(
+									 _block_number,
+									 processed_requests
+								 )) = tx1.call
+		{
+			assert_eq!(1, processed_requests.len());
+		}
+
 	});
 }
 
 #[test]
-fn should_submit_raw_unsigned_transaction_on_chain() {
+fn should_save_data_onchain_for_unsigned_requests() {
 	// const PHRASE: &str =
 	// "news slush supreme milk chapter athlete soap sausage put clutch what kitten";
 	let (offchain, offchain_state) = testing::TestOffchainExt::new();
@@ -304,26 +312,84 @@ fn should_submit_raw_unsigned_transaction_on_chain() {
 	mock_response(&mut offchain_state.write());
 	let expected_response = br#"{"USD": 155.23}"#.to_vec();
 	t.execute_with(|| {
-		KylinOracle::request_price_feed(Origin::signed(Default::default()),str::from_utf8(b"btc_usd").unwrap().as_bytes().to_vec()).unwrap();
+		KylinOracle::submit_price_feed(Origin::signed(Default::default()),str::from_utf8(b"btc_usd").unwrap().as_bytes().to_vec()).unwrap();
 		KylinOracle::fetch_data_and_send_raw_unsigned(1).unwrap();
 
 		let tx1 = pool_state.write().transactions.pop().unwrap();
 		let tx2 = pool_state.write().transactions.pop().unwrap();
 
-		let _tx1 = Extrinsic::decode(&mut &*tx1).unwrap();
+		let tx1 = Extrinsic::decode(&mut &*tx1).unwrap();
 		let tx2 = Extrinsic::decode(&mut &*tx2).unwrap();
 
 		if let Call::KylinOracle(crate::Call::submit_data_unsigned(
-			_block_number,
-			_key,
-			response,
-		)) = tx2.call
+									 _block_number,
+									 _key,
+									 response,
+								 )) = tx2.call
 		{
 			assert_eq!(response, expected_response);
 		}
 
+		if let Call::KylinOracle(crate::Call::clear_processed_requests_unsigned(
+									 _block_number,
+									 processed_requests
+								 )) = tx1.call
+		{
+			assert_eq!(1, processed_requests.len());
+		}
 	});
 }
+
+#[test]
+fn should_save_submitted_data_onchain_for_signed_requests() {
+	const PHRASE: &str =
+		"news slush supreme milk chapter athlete soap sausage put clutch what kitten";
+	let (offchain, _offchain_state) = testing::TestOffchainExt::new();
+	let (pool, pool_state) = testing::TestTransactionPoolExt::new();
+	let keystore = KeyStore::new();
+	SyncCryptoStore::sr25519_generate_new(
+		&keystore,
+		kylin_oracle::KEY_TYPE,
+		Some(&format!("{}/hunter1", PHRASE)),
+	).unwrap();
+
+	let mut t = sp_io::TestExternalities::default();
+	t.register_extension(OffchainWorkerExt::new(offchain));
+	t.register_extension(TransactionPoolExt::new(pool));
+	t.register_extension(KeystoreExt(Arc::new(keystore)));
+
+	let feed_name = b"test_feed".to_vec();
+	let sample_data = b"{sample_data}".to_vec();
+	t.execute_with(|| {
+		KylinOracle::write_data_onchain(Origin::signed(Default::default()),feed_name,sample_data.clone()).unwrap();
+		KylinOracle::fetch_data_and_send_signed(1).unwrap();
+
+		let tx1 = pool_state.write().transactions.pop().unwrap();
+		let tx2 = pool_state.write().transactions.pop().unwrap();
+
+		let tx1 = Extrinsic::decode(&mut &*tx1).unwrap();
+		let tx2 = Extrinsic::decode(&mut &*tx2).unwrap();
+
+		if let Call::KylinOracle(crate::Call::submit_data_signed(
+									 _block_number,
+									 _key,
+									 response,
+								 )) = tx2.call
+		{
+			assert_eq!(response, sample_data);
+		}
+
+		if let Call::KylinOracle(crate::Call::clear_processed_requests_unsigned(
+									 _block_number,
+									 processed_requests
+								 )) = tx1.call
+		{
+			assert_eq!(1, processed_requests.len());
+		}
+	});
+}
+
+
 
 fn mock_response(state: &mut testing::OffchainState) {
 	state.expect_request(testing::PendingRequest {
