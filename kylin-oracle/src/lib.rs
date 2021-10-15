@@ -28,7 +28,9 @@ use sp_runtime::{
 
 use cumulus_primitives_core::ParaId;
 use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para};
-use xcm::latest::{prelude::*, Xcm, SendXcm, OriginKind, Junction};
+//use xcm::latest::{prelude::*, Xcm, SendXcm, OriginKind, Junction};
+
+use xcm::v0::{Xcm, Error as XcmError, SendXcm, OriginKind, MultiLocation, Junction};
 
 #[cfg(test)]
 mod tests;
@@ -241,6 +243,19 @@ pub mod pallet	{
 			Self::add_data_request(Some(requester_account_id), Some(requester_para_id), Some(url.as_bytes().to_vec()), "price_feeding".as_bytes().to_vec(),Vec::new())
 		}
 
+		//HariOm - Adding Hello World public function
+		#[pallet::weight(0)]
+		pub fn hariom_siddhidatri(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
+			ensure_root(origin)?;
+			
+
+			//println!("HariOm Namashivaya");
+			
+
+			Ok(().into())
+		}
+
+
 		#[pallet::weight(0)]
 		pub fn receive_response_from_parachain(origin: OriginFor<T>, feed_name:Vec<u8> ,response:Vec<u8>) -> DispatchResult {
 			let para_id = ensure_sibling_para(<T as Config>::Origin::from(origin))?;
@@ -300,7 +315,7 @@ pub mod pallet	{
 		SavedToDWH(Option<ParaId>, Vec<u8>, DataRequest<T::BlockNumber, T::AccountId>, T::BlockNumber),
 
 		ResponseSent(ParaId,DataRequest<T::BlockNumber, T::AccountId>,T::BlockNumber),
-		ErrorSendingResponse(SendError,ParaId,DataRequest<T::BlockNumber, T::AccountId>),
+		ErrorSendingResponse(XcmError,ParaId,DataRequest<T::BlockNumber, T::AccountId>),
 		ResponseReceived(ParaId,Vec<u8>,Vec<u8>,T::BlockNumber)
 	}
 
@@ -475,13 +490,14 @@ impl<T: Config> Pallet<T> {
 		let saved_request = Self::saved_data_requests(key);
 		if saved_request.para_id.is_some(){
 			match T::XcmSender::send_xcm(
-				(1, Junction::Parachain(saved_request.para_id.unwrap().into())).into(),
-				Xcm(vec![Transact {
+				//(1, Junction::Parachain(saved_request.para_id.unwrap().into())).into(),
+				MultiLocation::X2(Junction::Parent, Junction::Parachain(saved_request.para_id.unwrap().into())),
+				Xcm::Transact {
 					origin_type: OriginKind::Native,
 					require_weight_at_most: 1_000,
 					call: <T as Config>::Call::from(Call::<T>::receive_response_from_parachain(saved_request.payload.clone(), saved_request.feed_name.clone())).encode().into(),
 				},
-				])) {
+				) {
 				Ok(()) => Self::deposit_event(Event::ResponseSent(saved_request.para_id.unwrap(), saved_request.clone(),block_number)),
 				Err(e) => Self::deposit_event(Event::ErrorSendingResponse(e, saved_request.para_id.unwrap(), saved_request.clone())),
 			}
