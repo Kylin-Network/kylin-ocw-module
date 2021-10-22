@@ -10,7 +10,6 @@ use frame_support::{log, dispatch::DispatchResultWithPostInfo, pallet_prelude::*
 use frame_system::pallet_prelude::*;
 use frame_system::Config as SystemConfig;
 use sp_std::str;
-use sp_std::vec;
 use sp_std::vec::Vec;
 use sp_std::borrow::ToOwned;
 use frame_support::storage::IterableStorageMap;
@@ -28,7 +27,7 @@ use sp_runtime::{
 
 use cumulus_primitives_core::ParaId;
 use cumulus_pallet_xcm::{Origin as CumulusOrigin, ensure_sibling_para};
-use xcm::latest::{prelude::*, Xcm, SendXcm, OriginKind, Junction};
+use xcm::latest::{Xcm,Error as SendError, SendXcm, OriginKind, Junction};
 
 #[cfg(test)]
 mod tests;
@@ -476,12 +475,12 @@ impl<T: Config> Pallet<T> {
 		if saved_request.para_id.is_some(){
 			match T::XcmSender::send_xcm(
 				(1, Junction::Parachain(saved_request.para_id.unwrap().into())).into(),
-				Xcm(vec![Transact {
+				Xcm::Transact {
 					origin_type: OriginKind::Native,
 					require_weight_at_most: 1_000,
 					call: <T as Config>::Call::from(Call::<T>::receive_response_from_parachain(saved_request.payload.clone(), saved_request.feed_name.clone())).encode().into(),
 				},
-				])) {
+				) {
 				Ok(()) => Self::deposit_event(Event::ResponseSent(saved_request.para_id.unwrap(), saved_request.clone(),block_number)),
 				Err(e) => Self::deposit_event(Event::ErrorSendingResponse(e, saved_request.para_id.unwrap(), saved_request.clone())),
 			}

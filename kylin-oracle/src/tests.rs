@@ -27,13 +27,15 @@ use sp_core::{
 use sp_keystore::{testing::KeyStore, KeystoreExt, SyncCryptoStore};
 use sp_std::str;
 use sp_std::vec::Vec;
-use std::sync::Arc;
+use std::{result, sync::Arc};
 
 use sp_runtime::{
     testing::{Header, TestXt},
     traits::{BlakeTwo256, Extrinsic as ExtrinsicT, IdentifyAccount, IdentityLookup, Verify},
 };
-use xcm::latest::{SendXcm, Xcm};
+use xcm::latest::{
+    Error as XcmError, Junctions::Here, MultiAsset, MultiLocation, NetworkId, Parent, SendXcm, Xcm,
+};
 use xcm_builder::{
     AllowUnpaidExecutionFrom, EnsureXcmOrigin, FixedWeightBounds, SignedToAccountId32,
 };
@@ -44,6 +46,8 @@ use xcm_executor::{
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlock<Test>;
+pub type SendResult = result::Result<(), SendError>;
+use xcm::opaque::latest::prelude::XcmResult;
 
 parameter_types! {
     pub const BlockHashCount: u64 = 250;
@@ -209,9 +213,10 @@ impl xcm_executor::Config for XcmConfig {
     type IsTeleporter = ();
     type LocationInverter = InvertNothing;
     type Barrier = Barrier;
-    type Weigher = FixedWeightBounds<UnitWeightCost, Call, MaxInstructions>;
+    type Weigher = FixedWeightBounds<UnitWeightCost, Call>;
     type Trader = DummyWeightTrader;
     type ResponseHandler = ();
+    type SubscriptionService = ();
 }
 
 impl pallet_xcm::Config for Test {
@@ -223,10 +228,8 @@ impl pallet_xcm::Config for Test {
     type XcmExecuteFilter = Everything;
     type XcmExecutor = XcmExecutor<XcmConfig>;
     type XcmTeleportFilter = Everything;
-    type Weigher = FixedWeightBounds<UnitWeightCost, Call, MaxInstructions>;
+    type Weigher = FixedWeightBounds<UnitWeightCost, Call>;
     type XcmReserveTransferFilter = Everything;
-    type Origin = Origin;
-    type Call = Call;
 }
 
 impl cumulus_pallet_xcm::Config for Test {
@@ -286,7 +289,6 @@ fn should_save_data_onchain_for_signed_data_submissions() {
         }
     });
 }
-
 
 #[test]
 #[ignore = "need to find the way to pass generic origin"]
@@ -589,8 +591,7 @@ fn mock_response_via_passed_api_url(state: &mut testing::OffchainState, url: &st
     });
 }
 
-
-//TODO need to fix and try to return error 
+//TODO need to fix and try to return error
 fn mock_response_via_passed_api_url_error(state: &mut testing::OffchainState, url: &str) {
     state.expect_request(testing::PendingRequest {
         method: "GET".into(),
