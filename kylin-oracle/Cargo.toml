@@ -40,10 +40,10 @@ sp-runtime = { git = 'https://github.com/paritytech/substrate', branch = 'master
 sp-io = { git = 'https://github.com/paritytech/substrate', branch = 'master', default-features = false }
 sp-keystore = { git = 'https://github.com/paritytech/substrate', branch = 'master', default-features = false }
 pallet-timestamp = { git = 'https://github.com/paritytech/substrate', branch = 'master', default-features = false }
+pallet-transaction-payment = { git = 'https://github.com/paritytech/substrate', branch = 'master', default-features = false }
 pallet-xcm = { git = 'https://github.com/paritytech/polkadot', branch = 'master', default-features = false }
 xcm-builder = { git = 'https://github.com/paritytech/polkadot', branch = 'master', default-features = false }
 xcm-executor = { git = 'https://github.com/paritytech/polkadot', branch = 'master', default-features = false }
-
 
 [features]
 default = ['std']
