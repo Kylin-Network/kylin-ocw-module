@@ -19,11 +19,10 @@ use crate::*;
 use codec::Decode;
 use frame_support::{
 	parameter_types,
-	traits::{StorageMapShim, Everything},
-	weights::{DispatchInfo, IdentityFee, Weight},
+	traits::{Everything},
+	weights::{IdentityFee, Weight},
 };
 
-use pallet_balances::WeightInfo;
 use sp_core::{
 	offchain::{testing, OffchainWorkerExt, TransactionPoolExt},
 	sr25519::Signature,
@@ -54,7 +53,6 @@ use pallet_transaction_payment::CurrencyAdapter;
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlock<Test>;
 pub type Balance = u128;
-
 
 frame_support::construct_runtime!(
 	pub enum Test where
@@ -141,8 +139,6 @@ parameter_types! {
 	pub const UnsignedPriority: u64 = 1 << 20;
 }
 
-
-
 parameter_types! {
 	pub const ExistentialDeposit: u64 = 5;
 	pub const MaxReserves: u32 = 50;
@@ -166,7 +162,6 @@ impl SendXcm for DoNothingRouter {
 	}
 }
 // For testing the module, we construct a mock runtime.
-
 
 parameter_types! {
 	pub const MinimumPeriod: u64 = 1;
@@ -211,7 +206,6 @@ impl kylin_oracle::Config for Test {
 	type EstimateCallFee = TransactionPayment;
 }
 
-
 parameter_types! {
 	pub const UnitWeightCost: Weight = 10;
 	pub const MaxInstructions: u32 = 100;
@@ -233,7 +227,6 @@ impl WeightTrader for DummyWeightTrader {
 		Ok(Assets::default())
 	}
 }
-
 pub struct DummyAssetTransactor;
 impl TransactAsset for DummyAssetTransactor {
 	fn deposit_asset(_what: &MultiAsset, _who: &MultiLocation) -> XcmResult {
@@ -245,7 +238,6 @@ impl TransactAsset for DummyAssetTransactor {
 		Ok(asset.into())
 	}
 }
-
 pub struct XcmConfig;
 impl xcm_executor::Config for XcmConfig {
 	type Call = Call;
@@ -340,7 +332,6 @@ fn should_save_data_onchain_for_signed_data_submissions() {
 		{
 			assert_eq!(1, processed_requests.len());
 		}
-
 	});
 }
 
