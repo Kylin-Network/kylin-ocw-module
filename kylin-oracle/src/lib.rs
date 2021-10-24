@@ -367,36 +367,6 @@ pub mod pallet {
             }
         }
 
-        #[pallet::weight(<T as Config>::WeightInfo::submit_data())]
-        pub fn submit_price_feedd(
-            origin: OriginFor<T>,
-            para_id: Option<ParaId>,
-            requested_currencies: Vec<u8>,
-        ) -> DispatchResult {
-            let submitter_account_id = ensure_signed(origin.clone())?;
-            let feed_name = "price_feeding".as_bytes().to_vec();
-            let result =
-                Self::ensure_account_owns_table(submitter_account_id.clone(), feed_name.clone());
-            match result {
-                Ok(()) => {
-                    let currencies = str::from_utf8(&requested_currencies).unwrap();
-                    let api_url =
-                        str::from_utf8(b"https://api.kylin-node.co.uk/prices?currency_pairs=")
-                            .unwrap();
-                    let url = api_url.clone().to_owned() + currencies.clone();
-                    Self::add_data_request(
-                        Some(submitter_account_id),
-                        para_id,
-                        Some(url.as_bytes().to_vec()),
-                        "price_feeding".as_bytes().to_vec(),
-                        Vec::new(),
-                        false,
-                    )
-                }
-                _ => result,
-            }
-        }
-
         #[pallet::weight(0)]
         pub fn receive_response_from_parachain(
             origin: OriginFor<T>,
@@ -1117,6 +1087,7 @@ where
         }
 
         let mut queue_to_api: Vec<u64> = Vec::new();
+
         for (key, val) in <ApiQueue<T> as IterableStorageMap<_, _>>::iter() {
             // write data to postgres dB
             let url = str::from_utf8(b"https://api.kylin-node.co.uk/submit").unwrap();
@@ -1124,6 +1095,7 @@ where
                 .unwrap_or("Failed to submit data".as_bytes().to_vec());
             queue_to_api.push(key);
         }
+        
         if queue_to_api.iter().count() > 0 {
             let result = SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(
                 Call::clear_api_queue_unsigned {
