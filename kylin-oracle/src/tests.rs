@@ -16,7 +16,8 @@
 // limitations under the License.
 use crate as kylin_oracle;
 use crate::*;
-use codec::Decode;
+
+//use codec::Decode;
 use frame_support::{
     parameter_types,
     traits::Everything,
@@ -30,8 +31,8 @@ use sp_core::{
 };
 use sp_keystore::{testing::KeyStore, KeystoreExt, SyncCryptoStore};
 
-use sp_std::str;
-use sp_std::vec::Vec;
+//use sp_std::str;
+//use sp_std::vec::Vec;
 use std::sync::Arc;
 
 use sp_runtime::{
@@ -46,7 +47,7 @@ use xcm_executor::{
     Assets, XcmExecutor,
 };
 
-use sp_core::{ sr25519, Pair, Public};
+use sp_core::{sr25519, Pair, Public};
 
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
 type Block = frame_system::mocking::MockBlock<Test>;
@@ -83,8 +84,6 @@ impl pallet_transaction_payment::Config for Test {
 
 parameter_types! {
     pub const BlockHashCount: u64 = 250;
-    pub BlockWeights: frame_system::limits::BlockWeights =
-        frame_system::limits::BlockWeights::simple_max(1024);
 }
 pub type LocalOriginToLocation = SignedToAccountId32<Origin, AccountId, RelayNetwork>;
 pub type Barrier = AllowUnpaidExecutionFrom<Everything>;
@@ -132,8 +131,6 @@ where
 }
 
 parameter_types! {
-    pub const GracePeriod: u64 = 5;
-    pub const UnsignedInterval: u64 = 128;
     pub const UnsignedPriority: u64 = 1 << 20;
 }
 
@@ -160,7 +157,6 @@ impl SendXcm for DoNothingRouter {
     }
 }
 // For testing the module, we construct a mock runtime.
-
 parameter_types! {
     pub const MinimumPeriod: u64 = 1;
 }
@@ -171,7 +167,6 @@ impl pallet_timestamp::Config for Test {
     type WeightInfo = ();
 }
 
-// pub trait Config: CreateSignedTransaction<Self> + frame_system::Config {}
 impl<LocalCall> frame_system::offchain::CreateSignedTransaction<LocalCall> for Test
 where
     Call: From<LocalCall>,
@@ -187,9 +182,7 @@ where
 }
 
 parameter_types! {
-    // pub const RelayLocationson::X1(Parent);
     pub const RelayNetwork: NetworkId = NetworkId::Kusama;
-    // pub RelayChainOrigin: Origin = cumulus_pallet_xcm::Origin::Relay.into();
 }
 impl kylin_oracle::Config for Test {
     type Event = Event;
@@ -280,33 +273,42 @@ impl cumulus_pallet_xcm::Config for Test {
     type XcmExecutor = XcmExecutor<XcmConfig>;
 }
 
-#[test]
-fn should_save_data_onchain_for_signed_data_submissions() {
-    const PHRASE: &str =
-        "news slush supreme milk chapter athlete soap sausage put clutch what kitten";
-    let (offchain, offchain_state) = testing::TestOffchainExt::new();
-    let (pool, pool_state) = testing::TestTransactionPoolExt::new();
-
+fn initialise_test_setup(
+    is_signed: bool,
+    pool: testing::TestTransactionPoolExt,
+    offchain: testing::TestOffchainExt,
+) -> sp_io::TestExternalities {
     let keystore = KeyStore::new();
-
-    SyncCryptoStore::sr25519_generate_new(
-        &keystore,
-        kylin_oracle::KEY_TYPE,
-        Some(&format!("{}/hunter1", PHRASE)),
-    )
-    .unwrap();
+    if is_signed {
+        SyncCryptoStore::sr25519_generate_new(
+            &keystore,
+            kylin_oracle::KEY_TYPE,
+            Some(&format!("{}/hunter1", mock::TEST_PHRASE)),
+        )
+        .unwrap();
+    }
 
     let mut t = sp_io::TestExternalities::default();
     t.register_extension(OffchainWorkerExt::new(offchain));
     t.register_extension(TransactionPoolExt::new(pool));
     t.register_extension(KeystoreExt(Arc::new(keystore)));
-    mock_submit_response(&mut offchain_state.write());
-    let expected_response = br#"{"USD": 155.23}"#.to_vec();
+    t
+}
+
+
+#[test]
+fn should_save_data_onchain_for_signed_data_submissions() {
+    let (offchain, offchain_state) = testing::TestOffchainExt::new();
+    let (pool, pool_state) = testing::TestTransactionPoolExt::new();
+
+    let mut t = initialise_test_setup(true, pool, offchain);
+    mock::mock_submit_response(&mut offchain_state.write());
+    let expected_response = mock::TEST_RESPONSE.to_vec();
     t.execute_with(|| {
         KylinOracle::submit_price_feed(
             Origin::signed(Default::default()),
             None,
-            str::from_utf8(b"btc_usd").unwrap().as_bytes().to_vec(),
+            str::from_utf8(mock::BTC_USD).unwrap().as_bytes().to_vec(),
         )
         .unwrap();
         KylinOracle::fetch_data_and_send_signed(1).unwrap();
@@ -336,26 +338,20 @@ fn should_save_data_onchain_for_signed_data_submissions() {
     });
 }
 
+
 #[test]
 fn should_save_data_onchain_for_unsigned_submissions() {
-    // const PHRASE: &str =
-    // "news slush supreme milk chapter athlete soap sausage put clutch what kitten";
     let (offchain, offchain_state) = testing::TestOffchainExt::new();
     let (pool, pool_state) = testing::TestTransactionPoolExt::new();
+    let mut t = initialise_test_setup(false, pool, offchain);
 
-    let keystore = KeyStore::new();
-    let mut t = sp_io::TestExternalities::default();
-    t.register_extension(OffchainWorkerExt::new(offchain));
-    t.register_extension(TransactionPoolExt::new(pool));
-    t.register_extension(KeystoreExt(Arc::new(keystore)));
-
-    mock_submit_response(&mut offchain_state.write());
-    let expected_response = br#"{"USD": 155.23}"#.to_vec();
+    mock::mock_submit_response(&mut offchain_state.write());
+    let expected_response = mock::TEST_RESPONSE.to_vec();
     t.execute_with(|| {
         KylinOracle::submit_price_feed(
             Origin::signed(Default::default()),
             None,
-            str::from_utf8(b"btc_usd").unwrap().as_bytes().to_vec(),
+            str::from_utf8(mock::BTC_USD).unwrap().as_bytes().to_vec(),
         )
         .unwrap();
         KylinOracle::fetch_data_and_send_raw_unsigned(1).unwrap();
@@ -385,27 +381,14 @@ fn should_save_data_onchain_for_unsigned_submissions() {
     });
 }
 
+
 #[test]
 fn should_write_data_onchain_directly_for_signed_requests() {
-    const PHRASE: &str =
-        "news slush supreme milk chapter athlete soap sausage put clutch what kitten";
     let (offchain, _offchain_state) = testing::TestOffchainExt::new();
     let (pool, pool_state) = testing::TestTransactionPoolExt::new();
-    let keystore = KeyStore::new();
-    SyncCryptoStore::sr25519_generate_new(
-        &keystore,
-        kylin_oracle::KEY_TYPE,
-        Some(&format!("{}/hunter1", PHRASE)),
-    )
-    .unwrap();
-
-    let mut t = sp_io::TestExternalities::default();
-    t.register_extension(OffchainWorkerExt::new(offchain));
-    t.register_extension(TransactionPoolExt::new(pool));
-    t.register_extension(KeystoreExt(Arc::new(keystore)));
-
-    let feed_name = b"test_feed".to_vec();
-    let sample_data = b"{sample_data}".to_vec();
+    let feed_name = mock::TEST_FEED_NAME.to_vec();
+    let sample_data = mock::TEST_SAMPLE_DATA.to_vec();
+    let mut t = initialise_test_setup(true, pool, offchain);
     t.execute_with(|| {
         KylinOracle::write_data_onchain(
             Origin::signed(Default::default()),
@@ -454,105 +437,46 @@ where
 }
 
 
-fn mock_submit_response(state: &mut testing::OffchainState) {
-    state.expect_request(testing::PendingRequest {
-        method: "GET".into(),
-        uri: "https://api.kylin-node.co.uk/prices?currency_pairs=btc_usd".into(),
-        response: Some(br#"{"USD": 155.23}"#.to_vec()),
-        sent: true,
-        ..Default::default()
-    });
-
-}
-
-fn mock_post_response(state: &mut testing::OffchainState) {
-    
-
-    // state.expect_request(testing::PendingRequest {
-    //     method: "GET".into(),
-    //     uri: "https://api.kylin-node.co.uk/prices?currency_pairs=btc_usd".into(),
-    //     response: Some(br#"{"USD": 155.23}"#.to_vec()),
-    //     sent: true,
-    //     ..Default::default()
-    // });
-
-
-    let sample_body:Vec<u8> =  vec![123, 10, 32, 32, 32, 32, 34, 100, 97, 116, 97, 34, 58, 32, 123, 10, 32, 32, 32, 32, 32, 32, 32, 32, 34, 112, 97, 114, 97, 95, 105, 100, 34, 58, 32, 110, 117, 108, 108, 44, 10, 32, 32, 32, 32, 32, 32, 32, 32, 34, 97, 99, 99, 111, 117, 110, 116, 95, 105, 100, 34, 58, 32, 34, 100, 52, 51, 53, 57, 51, 99, 55, 49, 53, 102, 100, 100, 51, 49, 99, 54, 49, 49, 52, 49, 97, 98, 100, 48, 52, 97, 57, 57, 102, 100, 54, 56, 50, 50, 99, 56, 53, 53, 56, 56, 53, 52, 99, 99, 100, 101, 51, 57, 97, 53, 54, 56, 52, 101, 55, 97, 53, 54, 100, 97, 50, 55, 100, 34, 44, 10, 32, 32, 32, 32, 32, 32, 32, 32, 34, 114, 101, 113, 117, 101, 115, 116, 101, 100, 95, 98, 108, 111, 99, 107, 95, 110, 117, 109, 98, 101, 114, 34, 58, 32, 48, 44, 10, 32, 32, 32, 32, 32, 32, 32, 32, 34, 112, 114, 111, 99, 101, 115, 115, 101, 100, 95, 98, 108, 111, 99, 107, 95, 110, 117, 109, 98, 101, 114, 34, 58, 32, 48, 44, 10, 32, 32, 32, 32, 32, 32, 32, 32, 34, 114, 101, 113, 117, 101, 115, 116, 101, 100, 95, 116, 105, 109, 101, 115, 116, 97, 109, 112, 34, 58, 32, 48, 44, 10, 32, 32, 32, 32, 32, 32, 32, 32, 34, 112, 114, 111, 99, 101, 115, 115, 101, 100, 95, 116, 105, 109, 101, 115, 116, 97, 109, 112, 34, 58, 32, 48, 44, 10, 32, 32, 32, 32, 32, 32, 32, 32, 34, 112, 97, 121, 108, 111, 97, 100, 34, 58, 32, 34, 123, 115, 97, 109, 112, 108, 101, 95, 100, 97, 116, 97, 125, 34, 44, 10, 32, 32, 32, 32, 32, 32, 32, 32, 34, 102, 101, 101, 100, 95, 110, 97, 109, 101, 34, 58, 32, 34, 112, 114, 105, 99, 101, 95, 102, 101, 101, 100, 105, 110, 103, 34, 44, 10, 32, 32, 32, 32, 32, 32, 32, 32, 34, 117, 114, 108, 34, 58, 32, 34, 104, 116, 116, 112, 115, 58, 47, 47, 97, 112, 105, 46, 107, 121, 108, 105, 110, 45, 110, 111, 100, 101, 46, 99, 111, 46, 117, 107, 47, 112, 114, 105, 99, 101, 115, 63, 99, 117, 114, 114, 101, 110, 99, 121, 95, 112, 97, 105, 114, 115, 61, 98, 116, 99, 95, 117, 115, 100, 34, 10, 32, 32, 32, 32, 125, 44, 10, 32, 32, 32, 32, 34, 104, 97, 115, 104, 34, 58, 32, 34, 57, 57, 100, 48, 97, 51, 99, 97, 55, 98, 102, 53, 56, 57, 100, 99, 55, 57, 57, 51, 49, 97, 53, 101, 51, 49, 48, 98, 99, 101, 100, 51, 100, 57, 55, 55, 57, 48, 54, 98, 99, 50, 56, 57, 54, 101, 97, 49, 99, 101, 99, 97, 53, 97, 56, 50, 52, 101, 57, 49, 97, 57, 53, 49, 34, 10, 125];
-
-    let mut pending_request = testing::PendingRequest {
-        method: "POST".into(),
-        uri: "https://api.kylin-node.co.uk/submit".into(),
-        body: sample_body,
-        response: Some(br#"{"USD": 155.23}"#.to_vec()),
-        sent: true,
-        ..Default::default()
-    };
-
-    pending_request.headers.push(("x-api-key".into(), "test_api_key".into()));
-    pending_request.headers.push(("content-type".into(), "application/json".into()));
-    state.expect_request(pending_request);
-}
-
-fn mock_query_response(state: &mut testing::OffchainState) {
-    let pending_request = testing::PendingRequest {
-        // 99d0a3ca7bf589dc79931a5e310bced3d977906bc2896ea1ceca5a824e91a951
-        method: "GET".into(),
-        uri: "https://api.kylin-node.co.uk/query?hash=99d0a3ca7bf589dc79931a5e310bced3d977906bc2896ea1ceca5a824e91a951".into(),
-        response: Some(br#"{"USD": 155.23}"#.to_vec()),
-        sent: true,
-        ..Default::default()
-    };
-    state.expect_request(pending_request);
-}
-
 #[test]
 fn should_award_query_fees() {
-    let alice = get_account_id_from_seed::<sr25519::Public>("Alice");
-    let bob = get_account_id_from_seed::<sr25519::Public>("Bob");
+    let alice = get_account_id_from_seed::<sr25519::Public>(mock::ALICE);
+    let bob = get_account_id_from_seed::<sr25519::Public>(mock::BOB);
     let additional_amount = 10_000;
     let query_fee = 31252504;
 
     let (offchain, offchain_state) = testing::TestOffchainExt::new();
     let (pool, _pool_state) = testing::TestTransactionPoolExt::new();
 
-    let keystore = KeyStore::new();
-    let mut t = sp_io::TestExternalities::default();
-    t.register_extension(OffchainWorkerExt::new(offchain));
-    t.register_extension(TransactionPoolExt::new(pool));
-    t.register_extension(KeystoreExt(Arc::new(keystore)));
+    let mut t = initialise_test_setup(false, pool, offchain);
     t.execute_with(|| {
         let _ = <pallet_balances::Pallet<Test> as Currency<AccountId>>::deposit_creating(
-                        &alice,
-                        additional_amount
+            &alice,
+            additional_amount,
         );
 
-        let _ =  <pallet_balances::Pallet<Test> as Currency<AccountId>>::deposit_creating(
-                        &bob,
-                        additional_amount
-                    );
-        
-        let initial_alice_balance = <pallet_balances::Pallet<Test> as Currency<AccountId>>::free_balance(&alice);
+        let _ = <pallet_balances::Pallet<Test> as Currency<AccountId>>::deposit_creating(
+            &bob,
+            additional_amount,
+        );
 
-        let sample_data = b"{sample_data}".to_vec();
+        let initial_alice_balance =
+            <pallet_balances::Pallet<Test> as Currency<AccountId>>::free_balance(&alice);
+
+        let sample_data = mock::TEST_SAMPLE_DATA.to_vec();
         let mut processed_requests: Vec<u64> = Vec::new();
         let key = 10000000u64;
         processed_requests.push(key);
 
-        mock_submit_response(&mut offchain_state.write());       
+        mock::mock_submit_response(&mut offchain_state.write());
         KylinOracle::submit_price_feed(
             Origin::signed(alice),
             None,
-            str::from_utf8(b"btc_usd").unwrap().as_bytes().to_vec(),
+            str::from_utf8(mock::BTC_USD).unwrap().as_bytes().to_vec(),
         )
         .unwrap();
 
-        KylinOracle::submit_data_signed(
-            Origin::signed(alice),
-            1,
-            key,
-            sample_data.clone()
-        )
-        .unwrap();
+        KylinOracle::submit_data_signed(Origin::signed(alice), 1, key, sample_data.clone())
+            .unwrap();
         KylinOracle::fetch_data_and_send_raw_unsigned(1).unwrap();
         KylinOracle::clear_processed_requests_unsigned(
             Origin::none(),
@@ -560,30 +484,22 @@ fn should_award_query_fees() {
             processed_requests.clone(),
         )
         .unwrap();
-        mock_post_response(&mut offchain_state.write());
+        mock::mock_post_response(&mut offchain_state.write());
         KylinOracle::fetch_data_and_send_raw_unsigned(2).unwrap();
-    
 
-        mock_query_response(&mut offchain_state.write());
+        mock::mock_query_response(&mut offchain_state.write());
         KylinOracle::query_data(
             Origin::signed(bob),
             None,
-            str::from_utf8(b"price_feeding").unwrap().as_bytes().to_vec(),
+            str::from_utf8(b"price_feeding")
+                .unwrap()
+                .as_bytes()
+                .to_vec(),
         )
         .unwrap();
-        KylinOracle::submit_data_signed(
-            Origin::signed(bob),
-            2,
-            key,
-            sample_data.clone()
-        )
-        .unwrap();
-        KylinOracle::clear_api_queue_unsigned(
-            Origin::none(),
-            2,
-            processed_requests.clone(),
-        )
-        .unwrap();
+        KylinOracle::submit_data_signed(Origin::signed(bob), 2, key, sample_data.clone()).unwrap();
+        KylinOracle::clear_api_queue_unsigned(Origin::none(), 2, processed_requests.clone())
+            .unwrap();
         KylinOracle::fetch_data_and_send_raw_unsigned(3).unwrap();
 
         assert_eq!(
@@ -591,6 +507,4 @@ fn should_award_query_fees() {
             initial_alice_balance + query_fee,
         );
     });
-
 }
-

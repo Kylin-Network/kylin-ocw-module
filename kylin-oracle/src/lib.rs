@@ -42,7 +42,9 @@ use xcm::latest::{prelude::*, Junction, OriginKind, SendXcm, Xcm};
 pub use pallet::*;
 #[cfg(test)]
 mod tests;
-
+#[cfg(test)]
+mod mock;
+mod constant;
 pub mod weights;
 pub use weights::*;
 type BalanceOf<T> =
@@ -57,6 +59,7 @@ type BalanceOf<T> =
 /// The keys can be inserted manually via RPC (see `author_insertKey`).
 /// ocpf mean off-chain worker price fetch
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"ocpf");
+
 /// Based on the above `KeyTypeId` we need to generate a pallet-specific crypto type wrappers.
 /// We can use from supported crypto kinds (`sr25519`, `ed25519` and `ecdsa`) and augment
 /// the types with this pallet-specific identifier.
@@ -200,7 +203,7 @@ pub mod pallet {
         ) -> DispatchResult {
             ensure_signed(origin.clone())?;
             let submitter_account_id = ensure_signed(origin.clone())?;
-            let new_feed_name = (str::from_utf8(b"custom_").unwrap().to_owned()
+            let new_feed_name = (str::from_utf8(constant::CUSTOM_).unwrap().to_owned()
                 + str::from_utf8(&feed_name).unwrap())
             .as_bytes()
             .to_vec();
@@ -286,7 +289,7 @@ pub mod pallet {
         ) -> DispatchResult {
             ensure_signed(origin.clone())?;
             let submitter_account_id = ensure_signed(origin.clone())?;
-            let new_feed_name = (str::from_utf8(b"custom_").unwrap().to_owned()
+            let new_feed_name = (str::from_utf8(constant::CUSTOM_).unwrap().to_owned()
                 + str::from_utf8(&feed_name).unwrap())
             .as_bytes()
             .to_vec();
@@ -316,7 +319,7 @@ pub mod pallet {
             let requester_para_id =
                 ensure_sibling_para(<T as Config>::Origin::from(origin.clone()))?;
             let submitter_account_id = ensure_signed(origin.clone())?;
-            let new_feed_name = (str::from_utf8(b"custom_").unwrap().to_owned()
+            let new_feed_name = (str::from_utf8(constant::CUSTOM_).unwrap().to_owned()
                 + str::from_utf8(&feed_name).unwrap())
             .as_bytes()
             .to_vec();
@@ -344,21 +347,19 @@ pub mod pallet {
             requested_currencies: Vec<u8>,
         ) -> DispatchResult {
             let submitter_account_id = ensure_signed(origin.clone())?;
-            let feed_name = "price_feeding".as_bytes().to_vec();
+            let feed_name = constant::PRICE_FEEDING.as_bytes().to_vec();
             let result =
                 Self::ensure_account_owns_table(submitter_account_id.clone(), feed_name.clone());
             match result {
                 Ok(()) => {
                     let currencies = str::from_utf8(&requested_currencies).unwrap();
-                    let api_url =
-                        str::from_utf8(b"https://api.kylin-node.co.uk/prices?currency_pairs=")
-                            .unwrap();
+                    let api_url = str::from_utf8(constant::KYLIN_API_CURRENCY_PAIRS_URL).unwrap();
                     let url = api_url.clone().to_owned() + currencies.clone();
                     Self::add_data_request(
                         Some(submitter_account_id),
                         para_id,
                         Some(url.as_bytes().to_vec()),
-                        "price_feeding".as_bytes().to_vec(),
+                        constant::PRICE_FEEDING.as_bytes().to_vec(),
                         Vec::new(),
                         false,
                     )
@@ -622,7 +623,7 @@ where
     // fn to_json_string(&self, &mut object_elements:Vec<u8,JsonValue>) -> Result<&str, Utf8Error> {
     fn to_json_string(&self, encoded_value: Vec<u8>) -> Vec<u8> {
         let mut object_elements = Vec::new();
-        let para_key = str::from_utf8(b"para_id").unwrap().chars().collect();
+        let para_key = str::from_utf8(constant::PARA_ID).unwrap().chars().collect();
         if self.para_id.is_some() {
             let para_id_number_value = NumberValue {
                 integer: self.para_id.unwrap().into() as i64,
@@ -635,7 +636,10 @@ where
             object_elements.push((para_key, JsonValue::Null))
         }
 
-        let account_id_key = str::from_utf8(b"account_id").unwrap().chars().collect();
+        let account_id_key = str::from_utf8(constant::ACCOUNT_ID)
+            .unwrap()
+            .chars()
+            .collect();
         if self.account_id.is_some() {
             let account_id_in_hex = hex::encode(self.account_id.clone().unwrap().as_ref());
             object_elements.push((
@@ -646,7 +650,7 @@ where
             object_elements.push((account_id_key, JsonValue::Null))
         }
 
-        let requested_block_number_key = str::from_utf8(b"requested_block_number")
+        let requested_block_number_key = str::from_utf8(constant::REQUESTED_BLOCK_NUMBER)
             .unwrap()
             .chars()
             .collect();
@@ -661,7 +665,7 @@ where
             JsonValue::Number(requested_block_number),
         ));
 
-        let processed_block_number_key = str::from_utf8(b"processed_block_number")
+        let processed_block_number_key = str::from_utf8(constant::PROCESSED_BLOCK_NUMBER)
             .unwrap()
             .chars()
             .collect();
@@ -680,7 +684,7 @@ where
             JsonValue::Number(processed_block_number),
         ));
 
-        let requested_timestamp_key = str::from_utf8(b"requested_timestamp")
+        let requested_timestamp_key = str::from_utf8(constant::REQUESTED_TIMESTAMP)
             .unwrap()
             .chars()
             .collect();
@@ -695,7 +699,7 @@ where
             JsonValue::Number(requested_timestamp),
         ));
 
-        let processed_timestamp_key = str::from_utf8(b"processed_timestamp")
+        let processed_timestamp_key = str::from_utf8(constant::PROCESSED_TIMESTAMP)
             .unwrap()
             .chars()
             .collect();
@@ -710,25 +714,28 @@ where
             JsonValue::Number(processed_timestamp),
         ));
 
-        let payload_key = str::from_utf8(b"payload").unwrap().chars().collect();
+        let payload_key = str::from_utf8(constant::PAYLOAD).unwrap().chars().collect();
         let payload = str::from_utf8(&self.payload).unwrap().chars().collect();
         object_elements.push((payload_key, JsonValue::String(payload)));
 
-        let feed_name_key = str::from_utf8(b"feed_name").unwrap().chars().collect();
+        let feed_name_key = str::from_utf8(constant::FEED_NAME)
+            .unwrap()
+            .chars()
+            .collect();
         let feed_name = str::from_utf8(&self.feed_name).unwrap().chars().collect();
         object_elements.push((feed_name_key, JsonValue::String(feed_name)));
 
         let url_string = self.url.as_ref().unwrap();
-        let url_key = str::from_utf8(b"url").unwrap().chars().collect();
+        let url_key = str::from_utf8(constant::URL).unwrap().chars().collect();
         let url = str::from_utf8(&url_string).unwrap().chars().collect();
         object_elements.push((url_key, JsonValue::String(url)));
 
         let json = JsonValue::Object(object_elements.clone());
         object_elements = Vec::new();
-        let data_key = str::from_utf8(b"data").unwrap().chars().collect();
+        let data_key = str::from_utf8(constant::DATA).unwrap().chars().collect();
         object_elements.push((data_key, json));
 
-        let hash_key = str::from_utf8(b"hash").unwrap().chars().collect();
+        let hash_key = str::from_utf8(constant::HASH).unwrap().chars().collect();
         let encoded_hash =
             hex::encode(sp_runtime::traits::BlakeTwo256::hash(encoded_value.as_slice()).as_bytes())
                 .chars()
@@ -781,7 +788,7 @@ where
         if feed_exists {
             let feed = Self::feed_account_lookup(feed_name.clone());
             let latest_hash = feed.1;
-            let api_url = str::from_utf8(b"https://api.kylin-node.co.uk/query?hash=").unwrap();
+            let api_url = str::from_utf8(constant::KYLIN_API_HASH_URL).unwrap();
             let url = api_url.clone().to_owned() + str::from_utf8(&latest_hash.clone()).unwrap();
 
             let total_reward = {
@@ -976,7 +983,7 @@ where
         let signer = Signer::<T, T::AuthorityId>::all_accounts();
         if !signer.can_sign() {
             return Err(
-                "No local accounts available. Consider adding one via `author_insertKey` RPC.",
+                constant::ERROR_NO_LOCAL_ACCOUNT_AVAILABLE,
             )?;
         }
         let mut processed_requests: Vec<u64> = Vec::new();
@@ -985,7 +992,7 @@ where
             let mut response = val.payload.clone();
             if val.url.is_some() {
                 response = Self::fetch_http_get_result(val.url.clone().unwrap())
-                    .unwrap_or("Failed fetch data".as_bytes().to_vec());
+                    .unwrap_or(constant::FAILED_FETCH_DATA.as_bytes().to_vec());
             };
 
             // write data to postgres dB
@@ -997,8 +1004,13 @@ where
             });
             for (acc, res) in &results {
                 match res {
-                    Ok(()) => log::info!("[{:?}] Submitted data {}", acc.id, key),
-                    Err(e) => log::error!("[{:?}] Failed to submit transaction: {:?}", acc.id, e),
+                    Ok(()) => log::info!("[{:?}] {} {}", acc.id, constant::SUBMITTED_DATA, key),
+                    Err(e) => log::error!(
+                        "[{:?}] {}: {:?}",
+                        acc.id,
+                        constant::FAILED_TO_SUBMIT_TRANSACTION,
+                        e
+                    ),
                 }
             }
         }
@@ -1011,10 +1023,11 @@ where
             });
             for (acc, res) in &results {
                 match res {
-                    Ok(()) => log::info!("[{:?}] Clearing out processed requests.", acc.id),
+                    Ok(()) => log::info!("[{:?}] {}",acc.id,constant::CLEARING_OUT_PROCESSED_REQUESTS),
                     Err(e) => log::error!(
-                        "[{:?}] Failed to clear out processed requests: {:?}",
+                        "[{:?}] {}: {:?}",
                         acc.id,
+                        constant::FAILED_TO_CLEAR_OUT_PROCESSED_REQUESTS,
                         e
                     ),
                 }
@@ -1024,9 +1037,9 @@ where
         let mut queue_to_api: Vec<u64> = Vec::new();
         for (key, val) in <ApiQueue<T> as IterableStorageMap<_, _>>::iter() {
             // write data to postgres dB
-            let url = str::from_utf8(b"https://api.kylin-node.co.uk/submit").unwrap();
+            let url = str::from_utf8(constant::KYLIN_API_SUBMIT_URL).unwrap();
             let _post_response = Self::submit_http_post_request(url.as_bytes().to_vec(), val)
-                .unwrap_or("Failed to submit data".as_bytes().to_vec());
+                .unwrap_or(constant::FAILED_TO_SUBMIT_DATA.as_bytes().to_vec());
             queue_to_api.push(key);
         }
         if queue_to_api.iter().count() > 0 {
@@ -1038,7 +1051,7 @@ where
                 .into(),
             );
             if let Err(e) = result {
-                log::error!("Error clearing api queue: {:?}", e);
+                log::error!("{}: {:?}", constant::ERROR_CLEARING_API_QUEUE, e);
             }
         }
         Ok(())
@@ -1047,7 +1060,7 @@ where
     fn fetch_data_and_send_raw_unsigned(block_number: T::BlockNumber) -> Result<(), &'static str> {
         let next_unsigned_at = <NextUnsignedAt<T>>::get();
         if next_unsigned_at > block_number {
-            return Err("Too early to send unsigned transaction");
+            return Err(constant::TOO_EARLY_TO_SEND_UNSIGNED_TRANSACTION);
         }
 
         let mut processed_requests: Vec<u64> = Vec::new();
@@ -1055,7 +1068,7 @@ where
             let mut response = val.payload.clone();
             if val.url.is_some() {
                 response = Self::fetch_http_get_result(val.url.clone().unwrap())
-                    .unwrap_or("Failed fetch data".as_bytes().to_vec());
+                    .unwrap_or(constant::FAILED_FETCH_DATA.as_bytes().to_vec());
             }
 
             processed_requests.push(key);
@@ -1069,7 +1082,11 @@ where
             );
 
             if let Err(e) = result {
-                log::error!("Error submitting unsigned transaction: {:?}", e);
+                log::error!(
+                    "{}: {:?}",
+                    constant::ERROR_SUBMITTING_UNSIGNED_TRANSACTION,
+                    e
+                );
             }
         }
         if processed_requests.iter().count() > 0 {
@@ -1082,7 +1099,7 @@ where
             );
 
             if let Err(e) = result {
-                log::error!("Error clearing queue: {:?}", e);
+                log::error!("{}: {:?}",constant::ERROR_CLEARING_QUEUE, e);
             }
         }
 
@@ -1090,12 +1107,12 @@ where
 
         for (key, val) in <ApiQueue<T> as IterableStorageMap<_, _>>::iter() {
             // write data to postgres dB
-            let url = str::from_utf8(b"https://api.kylin-node.co.uk/submit").unwrap();
+            let url = str::from_utf8(constant::KYLIN_API_SUBMIT_URL).unwrap();
             let _post_response = Self::submit_http_post_request(url.as_bytes().to_vec(), val)
-                .unwrap_or("Failed to submit data".as_bytes().to_vec());
+                .unwrap_or(constant::FAILED_TO_SUBMIT_DATA.as_bytes().to_vec());
             queue_to_api.push(key);
         }
-        
+
         if queue_to_api.iter().count() > 0 {
             let result = SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(
                 Call::clear_api_queue_unsigned {
@@ -1105,7 +1122,7 @@ where
                 .into(),
             );
             if let Err(e) = result {
-                log::error!("Error clearing api queue: {:?}", e);
+                log::error!("{}: {:?}", constant::ERROR_CLEARING_API_QUEUE, e);
             }
         }
 
@@ -1146,7 +1163,7 @@ where
 
         // Let's check the status code before we proceed to reading the response.
         if response.code != 200 {
-            log::info!("Unexpected status code: {}", response.code);
+            log::info!("{}: {}", constant::UNEXPECTED_STATUS_CODE, response.code);
             return Err(http::Error::Unknown);
         }
 
@@ -1156,7 +1173,7 @@ where
         let body = response.body().collect::<Vec<u8>>();
         // Create a str slice from the body.
         let body_str = sp_std::str::from_utf8(&body).map_err(|_| {
-            log::info!("No UTF8 body");
+            log::info!("{}", constant::NO_UTF8_BODY);
             http::Error::Unknown
         })?;
 
@@ -1174,8 +1191,8 @@ where
         let request_body = val.clone().to_json_string(encoded_hash.clone());
         let request =
             http::Request::post(str::from_utf8(&url).unwrap(), vec![request_body.clone()])
-                .add_header("x-api-key", "test_api_key")
-                .add_header("content-type", "application/json");
+                .add_header(constant::X_API_KEY, constant::TEST_API_KEY)
+                .add_header(constant::CONTENT_TYPE, constant::APPLICATION_JSON);
 
         // Send post request
         let pending = request
@@ -1191,14 +1208,14 @@ where
 
         // Check status code
         if response.code != 200 {
-            log::info!("Unexpected status code: {}", response.code);
+            log::info!("{}: {}", constant::UNEXPECTED_STATUS_CODE, response.code);
             return Err(http::Error::Unknown);
         }
 
         // Collect body
         let body = response.body().collect::<Vec<u8>>();
         let body_str = sp_std::str::from_utf8(&body).map_err(|_| {
-            log::info!("No UTF8 body");
+            log::info!("{}", constant::NO_UTF8_BODY);
             http::Error::Unknown
         })?;
 
@@ -1216,7 +1233,7 @@ where
         if &current_block < block_number {
             return InvalidTransaction::Future.into();
         }
-        ValidTransaction::with_tag_prefix("KylinOCW")
+        ValidTransaction::with_tag_prefix(constant::KYLIN_OCW)
             .priority(T::UnsignedPriority::get())
             .longevity(5)
             .propagate(true)

@@ -1,0 +1,36 @@
+pub const FAILED_TO_SUBMIT_DATA: &str = "Failed to submit data";
+pub const UNEXPECTED_STATUS_CODE: &str = "Unexpected status code";
+pub const NO_UTF8_BODY: &str = "No UTF8 body";
+pub const ERROR_CLEARING_API_QUEUE: &str = "Error clearing api queue";
+pub const ERROR_CLEARING_QUEUE: &str = "Error clearing queue";
+pub const FAILED_FETCH_DATA: &str = "Failed fetch data";
+pub const ERROR_SUBMITTING_UNSIGNED_TRANSACTION: &str = "Error submitting unsigned transaction";
+pub const ERROR_NO_LOCAL_ACCOUNT_AVAILABLE: &str =
+    "No local accounts available. Consider adding one via `author_insertKey` RPC.";
+pub const FAILED_TO_SUBMIT_TRANSACTION: &str = "Failed to submit transaction";
+pub const CLEARING_OUT_PROCESSED_REQUESTS: &str = "Clearing out processed requests.";
+pub const FAILED_TO_CLEAR_OUT_PROCESSED_REQUESTS: &str = "Failed to clear out processed requests";
+pub const TOO_EARLY_TO_SEND_UNSIGNED_TRANSACTION: &str = "Too early to send unsigned transaction";
+pub const SUBMITTED_DATA: &str = "Submitted data";
+pub const KYLIN_OCW: &str = "KylinOCW";
+pub const X_API_KEY: &str = "x-api-key";
+pub const CONTENT_TYPE: &str = "content-type";
+pub const TEST_API_KEY: &str = "test_api_key";
+pub const APPLICATION_JSON: &str = "application/json";
+pub const PRICE_FEEDING: &str = "price_feeding";
+pub const ACCOUNT_ID: &[u8; 10] = b"account_id";
+pub const PARA_ID: &[u8; 7] = b"para_id";
+pub const REQUESTED_BLOCK_NUMBER: &[u8; 22] = b"requested_block_number";
+pub const PROCESSED_BLOCK_NUMBER: &[u8; 22] = b"processed_block_number";
+pub const REQUESTED_TIMESTAMP: &[u8; 19] = b"requested_timestamp";
+pub const PROCESSED_TIMESTAMP: &[u8; 19] = b"processed_timestamp";
+pub const CUSTOM_: &[u8; 7] = b"custom_";
+pub const PAYLOAD: &[u8; 7] = b"payload";
+pub const FEED_NAME: &[u8; 9] = b"feed_name";
+pub const URL: &[u8; 3] = b"url";
+pub const DATA: &[u8; 4] = b"data";
+pub const HASH: &[u8; 4] = b"hash";
+pub const KYLIN_API_HASH_URL: &[u8; 40] = b"https://api.kylin-node.co.uk/query?hash=";
+pub const KYLIN_API_SUBMIT_URL: &[u8; 35] = b"https://api.kylin-node.co.uk/submit";
+pub const KYLIN_API_CURRENCY_PAIRS_URL: &[u8; 51] =
+    b"https://api.kylin-node.co.uk/prices?currency_pairs=";
